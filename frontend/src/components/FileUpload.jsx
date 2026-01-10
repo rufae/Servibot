@@ -1,8 +1,7 @@
 import { useState, useRef } from 'react'
 import { Upload, FileText, Image, Loader2, CheckCircle, XCircle } from 'lucide-react'
-import axios from 'axios'
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+import { uploadService } from '../services'
+import { API_BASE_URL } from '../services/api'
 
 export default function FileUpload() {
   const [isDragging, setIsDragging] = useState(false)
@@ -40,31 +39,38 @@ export default function FileUpload() {
         name: file.name,
         size: file.size,
         type: file.type,
-        status: 'uploading'
+        status: 'uploading',
+        progress: 0,
       }
       
       setUploadedFiles(prev => [...prev, fileData])
 
       try {
-        const formData = new FormData()
-        formData.append('file', file)
-
-        const response = await axios.post(`${API_BASE_URL}/api/upload`, formData, {
-          headers: {
-            'Content-Type': 'multipart/form-data'
-          }
+        // Upload with progress tracking
+        const result = await uploadService.uploadFile(file, (progress) => {
+          setUploadedFiles(prev => 
+            prev.map(f => 
+              f.name === file.name 
+                ? { ...f, progress }
+                : f
+            )
+          )
         })
+
+        if (!result.success) {
+          throw new Error(result.error)
+        }
 
         setUploadedFiles(prev => 
           prev.map(f => 
             f.name === file.name 
-              ? { ...f, status: 'success', file_id: response.data.file_id }
+              ? { ...f, status: 'success', file_id: result.data.file_id, progress: 100 }
               : f
           )
         )
 
         // Start polling status for automatic indexing
-        const fileId = response.data.file_id
+        const fileId = result.data.file_id
         pollIndexStatus(fileId)
       } catch (error) {
         console.error('Upload error:', error)
@@ -81,7 +87,7 @@ export default function FileUpload() {
     setIsUploading(false)
   }
 
-  const pollIndexStatus = (fileId) => {
+  const pollIndexStatus = async (fileId) => {
     const pollInterval = 1500
     const maxAttempts = 60 // up to ~90s
     let attempts = 0
@@ -89,14 +95,17 @@ export default function FileUpload() {
     const iv = setInterval(async () => {
       attempts += 1
       try {
-        const resp = await axios.get(`${API_BASE_URL}/api/upload/status/${encodeURIComponent(fileId)}`)
-        const status = resp.data.status
-        const attempts = resp.data.attempts || 0
-        setUploadedFiles(prev => prev.map(f => f.file_id === fileId ? { ...f, indexing_status: status, attempts } : f))
+        const result = await uploadService.getUploadStatus(fileId)
+        
+        if (result.success) {
+          const status = result.data.status
+          const attempts = result.data.attempts || 0
+          setUploadedFiles(prev => prev.map(f => f.file_id === fileId ? { ...f, indexing_status: status, attempts } : f))
 
-        if (status === 'indexed' || status === 'error') {
-          clearInterval(iv)
-          setUploadedFiles(prev => prev.map(f => f.file_id === fileId ? { ...f, status: status === 'indexed' ? 'success' : 'error', attempts } : f))
+          if (status === 'indexed' || status === 'error') {
+            clearInterval(iv)
+            setUploadedFiles(prev => prev.map(f => f.file_id === fileId ? { ...f, status: status === 'indexed' ? 'success' : 'error', attempts } : f))
+          }
         }
       } catch (err) {
         // stop polling if not found or other error after many attempts
@@ -141,6 +150,15 @@ export default function FileUpload() {
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         onClick={() => fileInputRef.current?.click()}
+        role="button"
+        tabIndex={0}
+        aria-label="Área para arrastrar y soltar archivos o hacer clic para seleccionar"
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            fileInputRef.current?.click()
+          }
+        }}
         className={`relative border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all duration-300 ${
           isDragging
             ? 'border-primary-500 bg-gradient-to-br from-primary-500/20 to-purple-500/20 scale-[1.02]'
@@ -168,6 +186,7 @@ export default function FileUpload() {
           multiple
           accept=".pdf,.png,.jpg,.jpeg,.txt,.md"
           onChange={handleFileSelect}
+          aria-label="Seleccionar archivos para subir"
           className="hidden"
         />
       </div>
@@ -201,7 +220,7 @@ export default function FileUpload() {
                     {file.status === 'uploading' && (
                       <div className="flex items-center gap-2 text-blue-400">
                         <Loader2 className="w-5 h-5 animate-spin" />
-                        <span className="text-xs">Subiendo...</span>
+                        <span className="text-xs">{file.progress || 0}%</span>
                       </div>
                     )}
                     {file.status === 'success' && (
@@ -225,22 +244,6 @@ export default function FileUpload() {
           </div>
         </div>
       )}
-
-      <style jsx>{`
-        .scrollbar-thin::-webkit-scrollbar {
-          width: 6px;
-        }
-        .scrollbar-thin::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .scrollbar-thin::-webkit-scrollbar-thumb {
-          background: #374151;
-          border-radius: 3px;
-        }
-        .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-          background: #4B5563;
-        }
-      `}</style>
     </div>
   )
 }
@@ -256,13 +259,16 @@ export function IndexButton({ file, onUpdate }) {
     setIndexing(true)
     setError(null)
     try {
-      // Use the reindex endpoint which updates UPLOAD_STATUS and runs indexing in background
-      const resp = await axios.post(`${API_BASE_URL}/api/upload/reindex/${encodeURIComponent(file.file_id || file.name)}`)
-      // mark as started
-      onUpdate && onUpdate({ ...file, indexing_status: 'indexing', index_info: resp.data })
+      const result = await uploadService.reindexFile(file.file_id || file.name)
+      
+      if (result.success) {
+        onUpdate && onUpdate({ ...file, indexing_status: 'indexing', index_info: result.data })
+      } else {
+        throw new Error(result.error)
+      }
     } catch (err) {
       console.error('Indexing error', err)
-      setError(err?.response?.data || err.message)
+      setError(err?.message || 'Indexing failed')
       onUpdate && onUpdate({ ...file, indexed: false, index_error: err?.message })
     } finally {
       setIndexing(false)

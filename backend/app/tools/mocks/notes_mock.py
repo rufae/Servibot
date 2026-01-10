@@ -42,3 +42,14 @@ def create_note(title: str, content: str, tags: list[str] | None = None) -> dict
 
     logger.info(f"Mock note created: {note_id}")
     return note
+
+
+def create_note_from_action(action: str) -> dict:
+    """Compatibility wrapper: accept a single action string from Executor.
+
+    The wrapper uses the full action as content and derives a short title.
+    """
+    # Derive title from action (first sentence or truncated)
+    title = action.strip().split(".\n")[0][:50]
+    content = action
+    return create_note(title=title or "Nota", content=content)

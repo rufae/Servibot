@@ -1,11 +1,11 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Send, Loader2, Volume2, FileDown } from 'lucide-react'
-import axios from 'axios'
 import VoiceRecorder from './VoiceRecorder'
 import AudioPlayer from './AudioPlayer'
 import FileGenerator from './FileGenerator'
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+import MarkdownRenderer from './MarkdownRenderer'
+import { chatService, voiceService } from '../services'
+import { API_BASE_URL } from '../services/api'
 
 export default function ChatInterface({ messages, setMessages, setAgentActivity }) {
   const [input, setInput] = useState('')
@@ -14,6 +14,15 @@ export default function ChatInterface({ messages, setMessages, setAgentActivity 
   const [showVoiceRecorder, setShowVoiceRecorder] = useState(false)
   const [showFileGenerator, setShowFileGenerator] = useState(false)
   const [audioUrlForMessage, setAudioUrlForMessage] = useState({}) // Map message index to audio URL
+  const messagesEndRef = useRef(null)
+
+  // Ensure messages is always an array
+  const safeMessages = Array.isArray(messages) ? messages : []
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [safeMessages, isLoading])
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return
@@ -29,28 +38,31 @@ export default function ChatInterface({ messages, setMessages, setAgentActivity 
     setIsLoading(true)
 
     try {
-      const response = await axios.post(`${API_BASE_URL}/api/chat`, {
-        message: input
-      })
+      const result = await chatService.sendMessage(input)
 
+      if (!result.success) {
+        throw new Error(result.error)
+      }
+
+      const response = result.data
       const assistantMessage = {
         role: 'assistant',
-        content: response.data.response,
-        sources: response.data.sources || null,
-        timestamp: response.data.timestamp,
-        plan: response.data.plan
+        content: response.response,
+        sources: response.sources || null,
+        timestamp: response.timestamp,
+        plan: response.plan
       }
 
       setMessages(prev => [...prev, assistantMessage])
 
       // Update agent activity timeline
-      if (response.data.plan) {
-        setAgentActivity(prev => [...prev, ...response.data.plan])
+      if (response.plan && Array.isArray(response.plan)) {
+        setAgentActivity(response.plan)
       }
 
       // Auto-download generated file if available
-      if (response.data.generated_file) {
-        const { filename, download_url } = response.data.generated_file
+      if (response.generated_file) {
+        const { filename, download_url } = response.generated_file
         console.log(`Auto-downloading generated file: ${filename}`)
         
         // Trigger download
@@ -59,7 +71,9 @@ export default function ChatInterface({ messages, setMessages, setAgentActivity 
         downloadLink.download = filename
         document.body.appendChild(downloadLink)
         downloadLink.click()
-        document.body.removeChild(downloadLink)
+        if (downloadLink.parentNode) {
+          document.body.removeChild(downloadLink)
+        }
         
         console.log(`Download triggered for: ${filename}`)
       }
@@ -91,16 +105,12 @@ export default function ChatInterface({ messages, setMessages, setAgentActivity 
 
   const handleGenerateTTS = async (messageIndex, messageContent) => {
     try {
-      const response = await axios.post(`${API_BASE_URL}/api/voice/synthesize`, {
-        text: messageContent,
-        language: 'es',
-        engine: 'gtts'
-      })
+      const result = await voiceService.synthesize(messageContent, 'es', 'gtts')
 
-      if (response.data.status === 'success') {
+      if (result.success && result.data.status === 'success') {
         setAudioUrlForMessage(prev => ({
           ...prev,
-          [messageIndex]: response.data.audio_url
+          [messageIndex]: result.data.audio_url
         }))
       }
     } catch (error) {
@@ -109,7 +119,7 @@ export default function ChatInterface({ messages, setMessages, setAgentActivity 
   }
 
   return (
-    <div className="bg-gradient-to-br from-gray-800 via-gray-900 to-gray-800 rounded-2xl shadow-2xl border border-gray-700 flex flex-col h-[600px] overflow-hidden">
+    <div className="bg-gradient-to-br from-gray-800 via-gray-900 to-gray-800 rounded-2xl shadow-2xl border border-gray-700 flex flex-col h-[500px] sm:h-[600px] overflow-hidden">
       {/* Chat Header */}
       <div className="px-6 py-5 border-b border-gray-700 bg-gradient-to-r from-primary-600/20 to-purple-600/20">
         <div className="flex items-center justify-between">
@@ -138,14 +148,14 @@ export default function ChatInterface({ messages, setMessages, setAgentActivity 
         {/* File Generator Panel */}
         {showFileGenerator && (
           <div className="mt-4 p-4 bg-gray-800/50 rounded-lg border border-gray-700">
-            <FileGenerator messages={messages} />
+            <FileGenerator messages={safeMessages} />
           </div>
         )}
       </div>
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-4 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
-        {messages.length === 0 ? (
+      <div className="flex-1 overflow-y-auto p-6 space-y-4 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent" role="log" aria-live="polite" aria-label="Historial de conversación">
+        {safeMessages.length === 0 ? (
           <div className="text-center text-gray-400 mt-20 animate-fadeIn">
             <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-primary-500/20 to-purple-500/20 flex items-center justify-center border border-primary-500/30">
               <span className="text-4xl">👋</span>
@@ -154,7 +164,7 @@ export default function ChatInterface({ messages, setMessages, setAgentActivity 
             <p className="text-sm text-gray-500">Envíame un mensaje para comenzar</p>
           </div>
         ) : (
-          messages.map((msg, idx) => (
+          safeMessages.map((msg, idx) => (
             <div
               key={idx}
               className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-slideIn`}
@@ -168,7 +178,11 @@ export default function ChatInterface({ messages, setMessages, setAgentActivity 
                     : 'bg-gradient-to-br from-gray-800 to-gray-900 text-gray-100 border border-gray-700'
                 }`}
               >
-                <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                {msg.role === 'user' ? (
+                  <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                ) : (
+                  <MarkdownRenderer content={msg.content} />
+                )}
                 
                 {/* TTS Button for assistant messages */}
                 {msg.role === 'assistant' && !msg.error && (
@@ -254,6 +268,7 @@ export default function ChatInterface({ messages, setMessages, setAgentActivity 
             </div>
           </div>
         )}
+        <div ref={messagesEndRef} />
       </div>
 
       {/* Input Area */}
@@ -285,6 +300,8 @@ export default function ChatInterface({ messages, setMessages, setAgentActivity 
             onKeyPress={handleKeyPress}
             placeholder="Escribe tu mensaje o usa el micrófono..."
             disabled={isLoading}
+            aria-label="Escribe tu mensaje"
+            aria-describedby="chat-input-description"
             className="flex-1 bg-gray-900 text-white rounded-xl px-5 py-3 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 border border-gray-700 focus:border-primary-500 transition-all placeholder-gray-500"
           />
           
@@ -308,6 +325,7 @@ export default function ChatInterface({ messages, setMessages, setAgentActivity 
           <button
             onClick={handleSend}
             disabled={isLoading || !input.trim()}
+            aria-label="Enviar mensaje"
             className="bg-gradient-to-r from-primary-600 to-primary-700 hover:from-primary-700 hover:to-primary-800 disabled:from-gray-600 disabled:to-gray-700 disabled:cursor-not-allowed text-white rounded-xl px-6 py-3 flex items-center space-x-2 transition-all shadow-lg hover:shadow-primary-500/30 disabled:shadow-none transform hover:scale-105 disabled:scale-100"
           >
             <Send className="w-5 h-5" />
@@ -315,42 +333,6 @@ export default function ChatInterface({ messages, setMessages, setAgentActivity 
           </button>
         </div>
       </div>
-
-      <style jsx>{`
-        @keyframes slideIn {
-          from {
-            opacity: 0;
-            transform: translateY(10px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        .animate-slideIn {
-          animation: slideIn 0.3s ease-out;
-        }
-        .animate-fadeIn {
-          animation: fadeIn 0.5s ease-out;
-        }
-        .scrollbar-thin::-webkit-scrollbar {
-          width: 6px;
-        }
-        .scrollbar-thin::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .scrollbar-thin::-webkit-scrollbar-thumb {
-          background: #374151;
-          border-radius: 3px;
-        }
-        .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-          background: #4B5563;
-        }
-      `}</style>
     </div>
   )
 }

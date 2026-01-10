@@ -113,7 +113,9 @@ async def transcribe_audio(file: UploadFile = File(...)):
 @router.post("/voice/synthesize", response_model=TTSResponse)
 async def synthesize_speech(request: TTSRequest):
     """
-    Convert text to speech using TTS engine.
+    Convert text to speech using TTS engine with automatic fallback.
+    
+    Tries gTTS first (better quality, requires internet), falls back to pyttsx3 (offline).
     
     Args:
         request: TTS request with text and options
@@ -137,58 +139,76 @@ async def synthesize_speech(request: TTSRequest):
         filename = f"tts_{timestamp}.mp3"
         file_path = os.path.join(audio_dir, filename)
         
-        if request.engine == "gtts":
-            # Use gTTS (Google Text-to-Speech) - requires internet
-            try:
-                from gtts import gTTS
-                
-                logger.info(f"Generating TTS with gTTS for text: {request.text[:50]}...")
-                tts = gTTS(text=request.text, lang=request.language, slow=False)
-                tts.save(file_path)
-                
-                logger.info(f"TTS audio generated with gTTS: {file_path}")
-                
-            except ImportError as ie:
-                logger.error(f"gTTS import error: {ie}")
-                raise HTTPException(
-                    status_code=500,
-                    detail="gTTS not installed. Run: pip install gTTS"
-                )
-            except Exception as gtts_err:
-                import traceback
-                logger.error(f"gTTS generation error: {gtts_err}")
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"gTTS failed: {str(gtts_err)}. Try using pyttsx3 engine instead."
-                )
+        engine_used = None
+        generation_error = None
         
+        # Try requested engine first, then fallback
+        engines_to_try = [request.engine]
+        if request.engine == "gtts":
+            engines_to_try.append("pyttsx3")  # Fallback
         elif request.engine == "pyttsx3":
-            # Use pyttsx3 (offline TTS) - works offline but voice quality varies
+            engines_to_try.append("gtts")  # Alternative fallback
+        
+        for engine_name in engines_to_try:
             try:
-                import pyttsx3
-                
-                engine = pyttsx3.init()
-                
-                # Set properties
-                engine.setProperty('rate', 150)  # Speed
-                engine.setProperty('volume', 0.9)  # Volume (0-1)
-                
-                # Save to file
-                engine.save_to_file(request.text, file_path)
-                engine.runAndWait()
-                
-                logger.info(f"TTS audio generated with pyttsx3: {file_path}")
-                
-            except ImportError:
-                raise HTTPException(
-                    status_code=500,
-                    detail="pyttsx3 not installed. Run: pip install pyttsx3"
-                )
-        else:
+                if engine_name == "gtts":
+                    # Use gTTS (Google Text-to-Speech) - requires internet
+                    try:
+                        from gtts import gTTS
+                    except ImportError:
+                        logger.warning("gTTS not installed, trying next engine")
+                        generation_error = "gTTS not installed"
+                        continue
+                    
+                    logger.info(f"🔊 Attempting TTS with gTTS for text: {request.text[:50]}...")
+                    tts = gTTS(text=request.text, lang=request.language, slow=False)
+                    tts.save(file_path)
+                    engine_used = "gtts"
+                    logger.info(f"✅ TTS audio generated with gTTS: {file_path}")
+                    break  # Success, exit loop
+                    
+                elif engine_name == "pyttsx3":
+                    # Use pyttsx3 (offline TTS) - works offline
+                    try:
+                        import pyttsx3
+                    except ImportError:
+                        logger.warning("pyttsx3 not installed, trying next engine")
+                        generation_error = "pyttsx3 not installed"
+                        continue
+                    
+                    logger.info(f"🔊 Attempting TTS with pyttsx3 for text: {request.text[:50]}...")
+                    # pyttsx3 generates WAV by default, rename to .wav
+                    filename_wav = filename.replace(".mp3", ".wav")
+                    file_path_wav = os.path.join(audio_dir, filename_wav)
+                    
+                    engine = pyttsx3.init()
+                    engine.setProperty('rate', 150)  # Speed
+                    engine.setProperty('volume', 0.9)  # Volume (0-1)
+                    engine.save_to_file(request.text, file_path_wav)
+                    engine.runAndWait()
+                    
+                    # Update filename to reflect actual format
+                    filename = filename_wav
+                    file_path = file_path_wav
+                    engine_used = "pyttsx3"
+                    logger.info(f"✅ TTS audio generated with pyttsx3: {file_path}")
+                    break  # Success, exit loop
+                    
+            except Exception as engine_error:
+                import traceback
+                logger.warning(f"⚠️ TTS engine '{engine_name}' failed: {engine_error}")
+                logger.debug(f"Traceback: {traceback.format_exc()}")
+                generation_error = str(engine_error)
+                # Continue to next engine
+                continue
+        
+        # Check if any engine succeeded
+        if not engine_used or not os.path.exists(file_path):
+            error_msg = f"All TTS engines failed. Last error: {generation_error}"
+            logger.error(f"❌ {error_msg}")
             raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported engine: {request.engine}. Use 'gtts' or 'pyttsx3'"
+                status_code=500,
+                detail=error_msg
             )
         
         # Return audio URL (relative path for frontend)
@@ -198,7 +218,7 @@ async def synthesize_speech(request: TTSRequest):
             status="success",
             audio_url=audio_url,
             filename=filename,
-            message="Audio generated successfully"
+            message=f"Audio generated successfully with {engine_used}"
         )
     
     except HTTPException:
@@ -217,13 +237,13 @@ async def synthesize_speech(request: TTSRequest):
 @router.get("/voice/audio/{filename}")
 async def get_audio_file(filename: str):
     """
-    Serve generated audio file.
+    Serve generated audio file with proper CORS and caching headers.
     
     Args:
         filename: Audio filename
         
     Returns:
-        Audio file
+        Audio file with appropriate headers
     """
     from fastapi.responses import FileResponse
     
@@ -236,10 +256,24 @@ async def get_audio_file(filename: str):
             detail=f"Audio file not found: {filename}"
         )
     
+    # Determine media type based on file extension
+    media_type = "audio/mpeg"  # Default for .mp3
+    if filename.endswith(".wav"):
+        media_type = "audio/wav"
+    elif filename.endswith(".ogg"):
+        media_type = "audio/ogg"
+    
     return FileResponse(
         path=file_path,
-        media_type="audio/mpeg",
-        filename=filename
+        media_type=media_type,
+        filename=filename,
+        headers={
+            "Cache-Control": "public, max-age=3600",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET",
+            "Access-Control-Allow-Headers": "*",
+            "Accept-Ranges": "bytes"
+        }
     )
 
 

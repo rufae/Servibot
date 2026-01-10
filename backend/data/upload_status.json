@@ -1,40 +1,11 @@
 {
-  "daniel_test.txt": {
-    "status": "retrying",
-    "message": "Retrying... (attempt 3)",
-    "attempts": 3,
-    "debug": {
-      "status": "error",
-      "message": "Embedding failed: Cannot copy out of meta tensor; no data! Please use torch.nn.Module.to_empty() instead of torch.nn.Module.to() when moving module from meta to a different device."
-    }
-  },
-  "laura_test.txt": {
+  "laura.txt": {
     "status": "indexed",
-    "message": "✓ Indexed 3 chunks (after retry)",
-    "attempts": 3,
-    "debug": {
-      "status": "success",
-      "indexed": 3,
-      "collection": "servibot_docs"
-    }
-  },
-  "20251210_195446_daniel.txt": {
-    "status": "indexed",
-    "message": "✓ Indexed 2 chunks (after retry)",
-    "attempts": 3,
-    "debug": {
-      "status": "success",
-      "indexed": 2,
-      "collection": "servibot_docs"
-    }
-  },
-  "20251210_195922_Manual del Alumno - 10x-2_.pdf": {
-    "status": "indexed",
-    "message": "Indexed 13 chunks",
+    "message": "✓ Indexed 2 chunks",
     "attempts": 0,
     "debug": {
       "status": "success",
-      "indexed": 13,
+      "indexed": 2,
       "collection": "servibot_docs"
     }
   }

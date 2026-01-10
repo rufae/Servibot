@@ -1,6 +1,9 @@
 import { Clock, CheckCircle, XCircle, AlertCircle } from 'lucide-react'
 
 export default function AgentTimeline({ activity }) {
+  // Ensure activity is always an array
+  const safeActivity = Array.isArray(activity) ? activity : []
+  
   const getStatusIcon = (status) => {
     switch (status) {
       case 'completed':
@@ -30,18 +33,18 @@ export default function AgentTimeline({ activity }) {
   }
 
   return (
-    <div className="bg-gray-800 rounded-lg shadow-xl border border-gray-700 p-6 h-[600px] flex flex-col">
-      <h2 className="text-xl font-semibold mb-4">Agent Activity</h2>
+    <div className="bg-gray-800 rounded-lg shadow-xl border border-gray-700 p-4 sm:p-6 h-[500px] sm:h-[600px] flex flex-col">
+      <h2 className="text-lg sm:text-xl font-semibold mb-4">Agent Activity</h2>
       
       <div className="flex-1 overflow-y-auto space-y-4">
-        {activity.length === 0 ? (
+        {safeActivity.length === 0 ? (
           <div className="text-center text-gray-400 mt-20">
             <Clock className="w-12 h-12 mx-auto mb-3 opacity-50" />
             <p className="text-sm">No activity yet</p>
             <p className="text-xs mt-1">Agent actions will appear here</p>
           </div>
         ) : (
-          activity.map((item, idx) => (
+          safeActivity.map((item, idx) => (
             <div
               key={idx}
               className={`border rounded-lg p-4 ${getStatusColor(item.status)}`}

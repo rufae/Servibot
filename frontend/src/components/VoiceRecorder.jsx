@@ -1,8 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Mic, MicOff, Loader2, CheckCircle, XCircle } from 'lucide-react';
-import axios from 'axios';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+import { voiceService } from '../services';
 
 /**
  * VoiceRecorder Component
@@ -203,20 +201,11 @@ export default function VoiceRecorder({ onTranscriptionComplete, disabled = fals
         type: audioChunksRef.current[0]?.type || 'audio/webm' 
       });
       
-      // Convert to WAV format if needed (Whisper prefers WAV/MP3)
-      const formData = new FormData();
-      formData.append('file', audioBlob, 'recording.webm');
-      
       // Send to backend for transcription
-      const response = await axios.post(`${API_URL}/api/voice/transcribe`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        },
-        timeout: 60000 // 60 seconds timeout for Whisper processing
-      });
+      const result = await voiceService.transcribe(audioBlob);
       
-      if (response.data.status === 'success') {
-        const transcribedText = response.data.text;
+      if (result.success && result.data.status === 'success') {
+        const transcribedText = result.data.text;
         setSuccess(true);
         
         // Clear success state after 2 seconds
@@ -227,13 +216,12 @@ export default function VoiceRecorder({ onTranscriptionComplete, disabled = fals
           onTranscriptionComplete(transcribedText);
         }
       } else {
-        throw new Error(response.data.error || 'Transcription failed');
+        throw new Error(result.error || 'Transcription failed');
       }
       
     } catch (err) {
       console.error('Error processing recording:', err);
       setError(
-        err.response?.data?.detail || 
         err.message || 
         'Error al transcribir el audio. Intenta de nuevo.'
       );
@@ -263,6 +251,8 @@ export default function VoiceRecorder({ onTranscriptionComplete, disabled = fals
       <button
         onClick={handleRecordClick}
         disabled={disabled || isProcessing || permissionStatus === 'denied'}
+        aria-label={isRecording ? 'Detener grabación' : 'Iniciar grabación'}
+        aria-pressed={isRecording}
         className={`
           relative p-3 rounded-full transition-all duration-300
           ${isRecording 
@@ -272,7 +262,6 @@ export default function VoiceRecorder({ onTranscriptionComplete, disabled = fals
           disabled:opacity-50 disabled:cursor-not-allowed
           focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2
         `}
-        title={isRecording ? 'Detener grabación' : 'Iniciar grabación'}
       >
         {isProcessing ? (
           <Loader2 className="w-5 h-5 text-white animate-spin" />
@@ -311,7 +300,7 @@ export default function VoiceRecorder({ onTranscriptionComplete, disabled = fals
 
       {/* Processing State */}
       {isProcessing && (
-        <div className="mt-3 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+        <div className="mt-3 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400" role="status" aria-live="polite">
           <Loader2 className="w-4 h-4 animate-spin" />
           <span>Transcribiendo audio con Whisper...</span>
         </div>

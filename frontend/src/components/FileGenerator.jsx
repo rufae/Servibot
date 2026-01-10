@@ -82,7 +82,9 @@ export default function FileGenerator({ messages, currentConversation = null }) 
         link.download = response.data.filename;
         document.body.appendChild(link);
         link.click();
-        document.body.removeChild(link);
+        if (link.parentNode) {
+          document.body.removeChild(link);
+        }
 
         // Clear success message after 5 seconds
         setTimeout(() => setSuccess(null), 5000);
@@ -171,7 +173,9 @@ export default function FileGenerator({ messages, currentConversation = null }) 
         link.download = response.data.filename;
         document.body.appendChild(link);
         link.click();
-        document.body.removeChild(link);
+        if (link.parentNode) {
+          document.body.removeChild(link);
+        }
 
         // Clear success message after 5 seconds
         setTimeout(() => setSuccess(null), 5000);

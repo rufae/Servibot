@@ -50,6 +50,7 @@ python-dotenv==1.0.0
 pyyaml==6.0.1
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+pyjwt==2.8.0
 
 # Google APIs (optional, for calendar and gmail)
 google-auth==2.27.0

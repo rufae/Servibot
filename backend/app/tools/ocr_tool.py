@@ -1,3 +1,32 @@
+"""Simple OCR tool adapter.
+
+Provides `get_ocr_tool()` returning a callable compatible with Executor.
+This is a lightweight mock/adapter used when `USE_MOCKS=True`.
+"""
+from typing import Callable
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class MockOCR:
+    def process(self, input_data: str) -> dict:
+        # In real implementation, input_data would be a file path or bytes
+        logger.info("Mock OCR processing invoked")
+        return {"status": "success", "text": f"Mocked OCR output for: {input_data[:100]}"}
+
+
+def get_ocr_tool() -> Callable[[str], dict]:
+    """Return a callable that accepts a single string (action or file reference).
+
+    The returned callable has the signature used by Executor when routing OCR tasks.
+    """
+    ocr = MockOCR()
+
+    def _call(action: str) -> dict:
+        return ocr.process(action)
+
+    return _call
 """
 OCR Tool - Extract text from images
 Supports multiple image formats with preprocessing for better accuracy

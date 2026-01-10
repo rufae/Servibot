@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { X, Trash2, FileText, AlertTriangle, CheckCircle, Clock, RefreshCw, Download } from 'lucide-react'
 import axios from 'axios'
 
@@ -16,10 +16,23 @@ export default function FileManager({ isOpen, onClose }) {
     if (isOpen) {
       loadFiles()
     }
+    console.log('FileManager mounted, isOpen=', isOpen)
+    return () => {
+      console.log('FileManager unmounted')
+    }
   }, [isOpen])
 
+  // Mounted guard to avoid state updates after unmount
+  const isMounted = useRef(true)
+  useEffect(() => {
+    isMounted.current = true
+    return () => {
+      isMounted.current = false
+    }
+  }, [])
+
   const loadFiles = async () => {
-    setLoading(true)
+    if (isMounted.current) setLoading(true)
     try {
       const [filesRes, statusRes] = await Promise.all([
         axios.get(`${API_BASE_URL}/api/upload/list`),
@@ -38,11 +51,11 @@ export default function FileManager({ isOpen, onClose }) {
         })
       )
 
-      setFiles(filesWithStatus)
+      if (isMounted.current) setFiles(filesWithStatus)
     } catch (error) {
       console.error('Error loading files:', error)
     } finally {
-      setLoading(false)
+      if (isMounted.current) setLoading(false)
     }
   }
 
@@ -67,36 +80,34 @@ export default function FileManager({ isOpen, onClose }) {
   }
 
   const handleDeleteSelected = async () => {
-    setDeleting(true)
+    if (isMounted.current) setDeleting(true)
     try {
       await Promise.all(
         Array.from(selectedFiles).map(filename =>
           axios.delete(`${API_BASE_URL}/api/upload/file/${encodeURIComponent(filename)}`)
         )
       )
-      setSelectedFiles(new Set())
+      if (isMounted.current) setSelectedFiles(new Set())
       await loadFiles()
-      setShowConfirm(false)
     } catch (error) {
       console.error('Error deleting files:', error)
       alert('Error al eliminar algunos archivos')
     } finally {
-      setDeleting(false)
+      if (isMounted.current) setDeleting(false)
     }
   }
 
   const handleClearAll = async () => {
-    setDeleting(true)
+    if (isMounted.current) setDeleting(true)
     try {
       await axios.delete(`${API_BASE_URL}/api/upload/clear-all`)
-      setSelectedFiles(new Set())
+      if (isMounted.current) setSelectedFiles(new Set())
       await loadFiles()
-      setShowConfirm(false)
     } catch (error) {
       console.error('Error clearing all files:', error)
       alert('Error al limpiar todos los archivos')
     } finally {
-      setDeleting(false)
+      if (isMounted.current) setDeleting(false)
     }
   }
 
@@ -323,7 +334,11 @@ export default function FileManager({ isOpen, onClose }) {
                   Cancelar
                 </button>
                 <button
-                  onClick={confirmAction}
+                  onClick={async () => {
+                    // Close modal immediately to avoid DOM mutation during async ops
+                    setShowConfirm(false)
+                    if (confirmAction) await confirmAction()
+                  }}
                   disabled={deleting}
                   className="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50"
                 >
@@ -345,22 +360,7 @@ export default function FileManager({ isOpen, onClose }) {
         )}
       </div>
 
-      <style jsx>{`
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        @keyframes scaleIn {
-          from { transform: scale(0.95); opacity: 0; }
-          to { transform: scale(1); opacity: 1; }
-        }
-        .animate-fadeIn {
-          animation: fadeIn 0.2s ease-out;
-        }
-        .animate-scaleIn {
-          animation: scaleIn 0.2s ease-out;
-        }
-      `}</style>
+      {/* Styles moved to global CSS to avoid runtime style tag issues */}
     </div>
   )
 }

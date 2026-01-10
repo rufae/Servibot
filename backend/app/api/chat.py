@@ -71,6 +71,84 @@ async def chat(message: ChatMessage):
         # 4) Evaluate results
         evaluation = evaluator.evaluate_results(exec_results)
 
+        # Check if executor returned data from calendar/email tools
+        tool_response = None
+        for result in exec_results.get("results", []):
+            if result.get("status") == "success":
+                result_data = result.get("result", {})
+                tool_used = result.get("tool_used")
+                
+                # Calendar tool: format events for response
+                if tool_used == "calendar" and isinstance(result_data, dict) and result_data.get("success"):
+                    # Check if it's a list, create, or update operation
+                    if "events" in result_data:
+                        # List events
+                        events = result_data.get("events", [])
+                        if events:
+                            event_list = []
+                            for event in events[:10]:  # Limit to 10 events
+                                summary = event.get("summary", "Sin título")
+                                start = event.get("start", "")
+                                # Format date nicely
+                                try:
+                                    if "T" in start:
+                                        dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+                                        formatted = dt.strftime("%d/%m/%Y %H:%M")
+                                    else:
+                                        formatted = start
+                                    event_list.append(f"• **{summary}** - {formatted}")
+                                except:
+                                    event_list.append(f"• **{summary}** - {start}")
+                            
+                            count = result_data.get("count", len(events))
+                            tool_response = f"📅 Tienes {count} eventos próximos:\n\n" + "\n".join(event_list)
+                    
+                    elif "event_id" in result_data and "start" in result_data:
+                        # Event created
+                        summary = result_data.get("summary", "Evento")
+                        start = result_data.get("start", "")
+                        try:
+                            if "T" in start:
+                                dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+                                formatted = dt.strftime("%d/%m/%Y %H:%M")
+                            else:
+                                formatted = start
+                        except:
+                            formatted = start
+                        
+                        html_link = result_data.get("html_link", "")
+                        tool_response = f"✅ Evento creado exitosamente:\n\n**{summary}**\n📅 {formatted}\n\n🔗 [Ver en Google Calendar]({html_link})"
+                    
+                    elif "event_id" in result_data and "summary" in result_data:
+                        # Event updated
+                        summary = result_data.get("summary", "Evento")
+                        html_link = result_data.get("html_link", "")
+                        tool_response = f"✅ Evento actualizado exitosamente:\n\n**{summary}**\n\n🔗 [Ver en Google Calendar]({html_link})"
+                
+                # Email tool: format emails for response
+                elif tool_used == "email" and isinstance(result_data, dict) and result_data.get("success"):
+                    # Check if it's a SEND or LIST operation
+                    if "message_id" in result_data:
+                        # Email sent successfully
+                        to = result_data.get("to", "")
+                        subject = result_data.get("subject", "")
+                        tool_response = f"✅ Correo enviado exitosamente:\n\n**Para:** {to}\n**Asunto:** {subject}"
+                    
+                    elif "messages" in result_data:
+                        # List emails
+                        messages = result_data.get("messages", [])
+                        if messages:
+                            email_list = []
+                            for msg in messages[:10]:  # Limit to 10 emails
+                                sender = msg.get("from", "Desconocido")
+                                subject = msg.get("subject", "Sin asunto")
+                                date = msg.get("date", "")
+                                snippet = msg.get("snippet", "")
+                                email_list.append(f"• **De:** {sender}\n  **Asunto:** {subject}\n  **Fecha:** {date}\n  _{snippet[:100]}..._")
+                            
+                            count = result_data.get("count", len(messages))
+                            tool_response = f"📧 Tienes {count} correos recientes:\n\n" + "\n\n".join(email_list)
+
         # Quick intent check: if the user is asking about what documents/files are uploaded,
         # return the listing/count directly (no need to call RAG).
         try:
@@ -114,29 +192,28 @@ async def chat(message: ChatMessage):
         # 5) Try to enrich with RAG sources - ALWAYS query ChromaDB if documents are indexed
         sources = None
         try:
-            from app.api.rag import QueryRequest, rag_query
-            from fastapi import HTTPException
-
+            from app.rag.query import semantic_search
+            
             # ALWAYS try RAG query to leverage uploaded documents
             logger.info(f"Querying RAG for: {message.message[:100]}")
-            rag_req = QueryRequest(query=message.message, top_k=5)
             
             try:
-                rag_resp = await rag_query(rag_req)
-                # rag_resp is a pydantic model with `.results`
-                sources = rag_resp.results if hasattr(rag_resp, "results") else None
+                rag_results = semantic_search(
+                    query=message.message,
+                    top_k=5,
+                    collection_name="servibot_docs"
+                )
                 
-                if sources:
+                if rag_results:
+                    sources = rag_results
                     logger.info(f"RAG returned {len(sources)} results")
                 else:
                     logger.info("RAG query returned no results")
-            except HTTPException as http_err:
-                # Handle 404 (no collection) gracefully
-                if http_err.status_code == 404:
-                    logger.info("No documents indexed yet - skipping RAG")
-                    sources = None
-                else:
-                    raise
+                    
+            except Exception as rag_err:
+                # Handle errors gracefully (e.g., no collection exists)
+                logger.info(f"RAG query error (likely no documents): {rag_err}")
+                sources = None
                 
         except Exception as e:
             # If RAG dependencies are missing or an error occurs, log and continue without sources
@@ -247,7 +324,17 @@ Respuesta (directa y basada en la información proporcionada):"""
         
         # Fallback if no response was generated
         if not response_text:
-            response_text = "He procesado tu solicitud. Por favor, proporciona más detalles o sube documentos para poder ayudarte mejor."
+            # Priority 1: Check if we have tool response from calendar/email
+            if tool_response:
+                response_text = tool_response
+                sources = []  # Clear sources when using tools
+            else:
+                response_text = "He procesado tu solicitud. Por favor, proporciona más detalles o sube documentos para poder ayudarte mejor."
+        else:
+            # If RAG generated a response but we also have tool_response, prefer tool_response
+            if tool_response:
+                response_text = tool_response
+                sources = []  # Clear sources when using tools
         # Ensure sources is a list of simple filenames (strings) or empty list
         if sources and isinstance(sources, list):
             # If sources contains dicts (old shape), extract filenames
@@ -318,3 +405,93 @@ async def get_chat_history(conversation_id: str):
         "messages": [],
         "message": "History retrieval will be implemented soon"
     }
+
+
+@router.post("/chat/stream")
+async def chat_stream(message: ChatMessage):
+    """
+    Streaming chat endpoint using Server-Sent Events (SSE).
+    Emits events for plan, execution steps, and final response.
+    
+    Args:
+        message: Chat message with user input
+        
+    Returns:
+        StreamingResponse with text/event-stream content
+    """
+    from fastapi.responses import StreamingResponse
+    import json
+    import asyncio
+    
+    async def event_generator():
+        """Generate SSE events for chat stream."""
+        try:
+            # Step 1: Generate plan
+            yield f"event: plan\ndata: {{\"type\": \"plan\", \"status\": \"generating\"}}\n\n"
+            await asyncio.sleep(0.1)
+            
+            plan = planner.generate_plan(message.message, message.context)
+            plan_data = {
+                "type": "plan",
+                "status": "generated",
+                "subtasks": [s.model_dump() for s in plan.subtasks]
+            }
+            yield f"event: plan\ndata: {json.dumps(plan_data)}\n\n"
+            
+            # Step 2: Execute steps one by one and emit progress
+            for subtask in plan.subtasks:
+                step_start = {
+                    "type": "step",
+                    "step": subtask.step,
+                    "status": "running",
+                    "action": subtask.action,
+                    "tool": subtask.tool
+                }
+                yield f"event: step\ndata: {json.dumps(step_start)}\n\n"
+                await asyncio.sleep(0.2)  # Simulate processing
+                
+                # Complete step
+                step_done = {
+                    "type": "step",
+                    "step": subtask.step,
+                    "status": "completed",
+                    "action": subtask.action
+                }
+                yield f"event: step\ndata: {json.dumps(step_done)}\n\n"
+            
+            # Step 3: Final execution (simplified - actual execution happens in real impl)
+            exec_results = await executor.execute_plan(plan, context=message.context)
+            
+            # Step 4: Evaluation
+            evaluation = evaluator.evaluate_results(exec_results)
+            
+            # Step 5: Final response
+            response_data = {
+                "type": "response",
+                "status": "completed",
+                "message": "Tarea completada exitosamente",
+                "execution": exec_results,
+                "evaluation": evaluation
+            }
+            yield f"event: response\ndata: {json.dumps(response_data)}\n\n"
+            
+            # Done signal
+            yield "event: done\ndata: {\"type\": \"done\"}\n\n"
+            
+        except Exception as e:
+            logger.exception("Error in chat stream")
+            error_data = {
+                "type": "error",
+                "message": str(e)
+            }
+            yield f"event: error\ndata: {json.dumps(error_data)}\n\n"
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # Disable nginx buffering
+        }
+    )

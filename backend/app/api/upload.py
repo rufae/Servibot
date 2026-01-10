@@ -141,10 +141,20 @@ async def upload_file(file: UploadFile = File(...)):
         dict: Upload status and file information
     """
     try:
+        # Logging de debugging para multipart/form-data
+        logger.info(f"Received upload request: filename={file.filename}, content_type={file.content_type}")
+        
+        # Validar que filename no sea None o vacío
+        if not file.filename:
+            logger.error("Upload rejected: no filename provided")
+            raise HTTPException(status_code=400, detail="No file provided or filename is empty")
+        
         # Validate file size
         file_size = 0
         file_content = await file.read()
         file_size = len(file_content)
+        
+        logger.info(f"File size: {file_size} bytes")
         
         if file_size > settings.MAX_UPLOAD_SIZE:
             raise HTTPException(
@@ -162,10 +172,18 @@ async def upload_file(file: UploadFile = File(...)):
                 detail=f"File type {file_ext} not supported. Allowed: {allowed_extensions}"
             )
         
-        # Generate unique filename
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        safe_filename = f"{timestamp}_{file.filename}"
-        file_path = os.path.join(settings.UPLOAD_DIR, safe_filename)
+        # Preserve original filename (avoid path components) and avoid collisions
+        original_name = Path(file.filename).name
+        safe_filename = original_name
+        upload_dir = settings.UPLOAD_DIR
+        candidate = safe_filename
+        counter = 1
+        # If a file with the same name already exists, append a numeric suffix
+        while os.path.exists(os.path.join(upload_dir, candidate)):
+            candidate = f"{Path(original_name).stem}_{counter}{Path(original_name).suffix}"
+            counter += 1
+        safe_filename = candidate
+        file_path = os.path.join(upload_dir, safe_filename)
         
         # Save file
         with open(file_path, "wb") as f:
@@ -282,12 +300,16 @@ async def get_upload_status(file_id: str):
 
 
 @router.get("/upload/list")
-async def list_uploaded_files():
+async def list_uploaded_files(skip: int = 0, limit: int = 50):
     """
-    List all uploaded files.
+    List all uploaded files with pagination support.
+    
+    Args:
+        skip: Number of files to skip (for pagination)
+        limit: Maximum number of files to return (default 50)
     
     Returns:
-        List of uploaded files with metadata
+        dict: Paginated list of uploaded files with metadata
     """
     try:
         files = []
@@ -301,9 +323,18 @@ async def list_uploaded_files():
                     "uploaded_at": datetime.fromtimestamp(stat.st_ctime).isoformat()
                 })
         
+        # Sort by upload time (newest first)
+        files_sorted = sorted(files, key=lambda x: x["uploaded_at"], reverse=True)
+        
+        # Apply pagination
+        paginated_files = files_sorted[skip:skip + limit]
+        
         return {
-            "count": len(files),
-            "files": files
+            "count": len(files_sorted),
+            "skip": skip,
+            "limit": limit,
+            "has_more": len(files_sorted) > skip + limit,
+            "files": paginated_files
         }
     except Exception as e:
         logger.error(f"Error listing files: {str(e)}")
@@ -325,7 +356,11 @@ async def get_uploaded_file(file_id: str):
     try:
         mime_type, _ = mimetypes.guess_type(file_path)
         media_type = mime_type or "application/octet-stream"
-        return FileResponse(path=file_path, filename=file_id, media_type=media_type)
+        
+        # Add Content-Disposition header to force download
+        headers = {"Content-Disposition": f'attachment; filename="{file_id}"'}
+        
+        return FileResponse(path=file_path, media_type=media_type, headers=headers, filename=file_id)
     except Exception as e:
         logger.exception(f"Failed to serve file {file_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to serve file: {str(e)}")

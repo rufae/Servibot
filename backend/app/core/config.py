@@ -25,6 +25,19 @@ class Settings(BaseSettings):
     # Google APIs
     GOOGLE_CALENDAR_CREDENTIALS: str = Field(default="")
     GMAIL_CREDENTIALS: str = Field(default="")
+    
+    # Google OAuth
+    GOOGLE_OAUTH_CLIENT_ID: str = Field(default="")
+    GOOGLE_OAUTH_CLIENT_SECRET: str = Field(default="")
+    GOOGLE_OAUTH_REDIRECT_URI: str = Field(default="http://localhost:8000/auth/google/callback")
+    GOOGLE_OAUTH_SCOPES: str = Field(default="https://www.googleapis.com/auth/calendar,https://www.googleapis.com/auth/calendar.events,https://www.googleapis.com/auth/gmail.send,https://www.googleapis.com/auth/gmail.readonly,openid,email,profile")
+    TOKEN_STORAGE: str = Field(default="sqlite")
+    
+    # Frontend URL for OAuth redirect
+    FRONTEND_URL: str = Field(default="http://localhost:5173")
+    
+    # JWT Secret Key
+    SECRET_KEY: str = Field(default="your-secret-key-change-in-production-please")
 
     # Third-party integrations
     NOTION_API_KEY: str = Field(default="")

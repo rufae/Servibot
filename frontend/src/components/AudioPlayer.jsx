@@ -170,7 +170,9 @@ export default function AudioPlayer({ audioUrl, autoPlay = false, onEnded = null
     link.download = audioUrl?.split('/').pop() || 'audio.mp3';
     document.body.appendChild(link);
     link.click();
-    document.body.removeChild(link);
+    if (link.parentNode) {
+      document.body.removeChild(link);
+    }
   };
 
   const initializeVisualization = () => {

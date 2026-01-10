@@ -62,8 +62,25 @@ class Planner:
         """
         logger.info(f"Generating plan for objective: {objective}")
         
-        # Detect query type
+        # Detect query type WITH PRIORITY ORDER
         obj_lower = objective.lower()
+        
+        # PRIORITY 1: Email SEND operation (highest priority)
+        is_email_send = any(kw in obj_lower for kw in ["enviar", "envia", "envía", "mandar", "manda", "send"]) and \
+                        any(kw in obj_lower for kw in ["correo", "email", "mensaje", "mail"])
+        
+        # Calendar query: asking about events or schedule
+        is_calendar_query = any(kw in obj_lower for kw in [
+            "evento", "eventos", "calendario", "calendar", "agenda", "reunión", "reuniones",
+            "meeting", "cita", "appointment", "próximo", "próximos", "siguiente", "next",
+            "horario", "schedule", "cuándo tengo", "cuando tengo", "what's on my"
+        ]) and not is_email_send  # Don't override email send
+        
+        # Email query: asking about messages, inbox, OR sending emails
+        is_email_query = any(kw in obj_lower for kw in [
+            "email", "correo", "correos", "mensaje", "mensajes", "inbox", "bandeja",
+            "mail", "gmail", "recibido", "enviado", "sent", "received"
+        ]) or is_email_send
         
         # Metadata query: asking ABOUT documents (how many, which files, etc.)
         is_metadata_query = False
@@ -82,10 +99,50 @@ class Planner:
             "qué", "que", "cuál", "cual", "cómo", "como", "quién", "quien", "dónde", "donde",
             "cuándo", "cuando", "por qué", "porque", "dame", "dime", "explica", "muestra",
             "what", "which", "how", "who", "where", "when", "why", "tell", "show", "explain"
-        ]) and not is_metadata_query
+        ]) and not is_metadata_query and not is_calendar_query and not is_email_query
         
         # Generate appropriate plan based on query type
-        if is_metadata_query:
+        if is_calendar_query:
+            # Calendar plan: list upcoming events
+            subtasks = [
+                SubTask(
+                    step=1,
+                    action="List upcoming calendar events",
+                    tool="calendar",
+                    estimated_time_minutes=1,
+                    requires_confirmation=False,
+                    success_criteria="Calendar events retrieved"
+                )
+            ]
+        elif is_email_query:
+            # Email plan: detect if it's SEND or LIST
+            is_send = any(kw in obj_lower for kw in ["enviar", "envia", "envía", "mandar", "manda", "send"])
+            
+            if is_send:
+                # Send email operation
+                subtasks = [
+                    SubTask(
+                        step=1,
+                        action="Send email with extracted parameters",
+                        tool="email",
+                        estimated_time_minutes=1,
+                        requires_confirmation=False,
+                        success_criteria="Email sent successfully"
+                    )
+                ]
+            else:
+                # List emails operation
+                subtasks = [
+                    SubTask(
+                        step=1,
+                        action="List recent emails from inbox",
+                        tool="email",
+                        estimated_time_minutes=1,
+                        requires_confirmation=False,
+                        success_criteria="Email messages retrieved"
+                    )
+                ]
+        elif is_metadata_query:
             # Simple plan for listing files
             subtasks = [
                 SubTask(
@@ -188,8 +245,8 @@ Instructions:
 4. Assess overall risk level (low/medium/high)
 
 Available tools:
-- calendar_tool: Create/update Google Calendar events
-- email_tool: Send emails via Gmail
+- calendar: List upcoming events or create new calendar entries in Google Calendar
+- email: List/read emails or send new messages via Gmail
 - notes_tool: Create notes in Notion/Todoist
 - file_writer: Generate PDF or Excel files
 - rag_query: Search knowledge base for context
