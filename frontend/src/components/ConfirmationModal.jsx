@@ -1,0 +1,301 @@
+import { X, Check, Edit2, XCircle, Save } from 'lucide-react'
+import { useEffect, useState } from 'react'
+
+export default function ConfirmationModal({ pendingAction, onConfirm, onEdit, onCancel }) {
+  if (!pendingAction) return null
+
+  const { action_type, action_params, confirmation_message } = pendingAction
+  
+  // Edit mode state
+  const [isEditMode, setIsEditMode] = useState(false)
+  const [editedParams, setEditedParams] = useState({ ...action_params })
+
+  // Prevent background scroll when modal is open
+  useEffect(() => {
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = 'unset'
+    }
+  }, [])
+
+  const renderActionDetails = () => {
+    if (action_type === 'send_email') {
+      if (isEditMode) {
+        // Editable mode
+        return (
+          <div className="bg-gradient-to-br from-blue-500/10 to-purple-500/10 rounded-lg p-4 border border-blue-500/30">
+            <div className="space-y-4">
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-semibold text-blue-300">Para:</label>
+                <input
+                  type="email"
+                  value={editedParams.to || ''}
+                  onChange={(e) => setEditedParams({ ...editedParams, to: e.target.value })}
+                  className="bg-gray-800/50 text-white text-sm rounded-lg px-3 py-2 border border-blue-500/30 focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-semibold text-blue-300">Asunto:</label>
+                <input
+                  type="text"
+                  value={editedParams.subject || ''}
+                  onChange={(e) => setEditedParams({ ...editedParams, subject: e.target.value })}
+                  className="bg-gray-800/50 text-white text-sm rounded-lg px-3 py-2 border border-blue-500/30 focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-semibold text-blue-300">Mensaje:</label>
+                <textarea
+                  value={editedParams.body || ''}
+                  onChange={(e) => setEditedParams({ ...editedParams, body: e.target.value })}
+                  rows={6}
+                  className="bg-gray-800/50 text-white text-sm rounded-lg px-3 py-2 border border-blue-500/30 focus:border-blue-500 focus:outline-none resize-y"
+                />
+              </div>
+            </div>
+          </div>
+        )
+      } else {
+        // View mode
+        return (
+          <div className="bg-gradient-to-br from-blue-500/10 to-purple-500/10 rounded-lg p-4 border border-blue-500/30">
+            <div className="space-y-2">
+              <div className="flex items-start gap-2">
+                <span className="text-sm font-semibold text-blue-300 min-w-[60px]">Para:</span>
+                <span className="text-sm text-white">{editedParams.to}</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="text-sm font-semibold text-blue-300 min-w-[60px]">Asunto:</span>
+                <span className="text-sm text-white">{editedParams.subject}</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="text-sm font-semibold text-blue-300 min-w-[60px]">Mensaje:</span>
+                <span className="text-sm text-white whitespace-pre-wrap">{editedParams.body}</span>
+              </div>
+            </div>
+          </div>
+        )
+      }
+    }
+
+    if (action_type === 'create_calendar_event') {
+      const formatDate = (isoString) => {
+        try {
+          const date = new Date(isoString)
+          return date.toLocaleString('es-ES', {
+            day: '2-digit',
+            month: 'long',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          })
+        } catch {
+          return isoString
+        }
+      }
+
+      return (
+        <div className="bg-gradient-to-br from-green-500/10 to-blue-500/10 rounded-lg p-4 border border-green-500/30">
+          <div className="space-y-2">
+            <div className="flex items-start gap-2">
+              <span className="text-sm font-semibold text-green-300 min-w-[70px]">Título:</span>
+              <span className="text-sm text-white">{action_params.summary}</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="text-sm font-semibold text-green-300 min-w-[70px]">Inicio:</span>
+              <span className="text-sm text-white">{formatDate(action_params.start_time)}</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="text-sm font-semibold text-green-300 min-w-[70px]">Fin:</span>
+              <span className="text-sm text-white">{formatDate(action_params.end_time)}</span>
+            </div>
+          </div>
+        </div>
+      )
+    }
+
+    // Fallback for other action types
+    return (
+      <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-600/30">
+        <pre className="text-sm text-gray-300 whitespace-pre-wrap overflow-x-auto">
+          {JSON.stringify(action_params, null, 2)}
+        </pre>
+      </div>
+    )
+  }
+
+  const getIcon = () => {
+    if (action_type === 'send_email') {
+      return (
+        <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center">
+          <span className="text-2xl">📧</span>
+        </div>
+      )
+    }
+    if (action_type === 'create_calendar_event') {
+      return (
+        <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-blue-500 rounded-full flex items-center justify-center">
+          <span className="text-2xl">📅</span>
+        </div>
+      )
+    }
+    return (
+      <div className="w-12 h-12 bg-gradient-to-br from-gray-500 to-gray-600 rounded-full flex items-center justify-center">
+        <span className="text-2xl">⚙️</span>
+      </div>
+    )
+  }
+
+  const getTitle = () => {
+    if (action_type === 'send_email') return 'Confirmar envío de email'
+    if (action_type === 'create_calendar_event') return 'Confirmar creación de evento'
+    return 'Confirmar acción'
+  }
+
+  return (
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/70 backdrop-blur-md animate-fadeIn"
+    >
+      <div 
+        className="bg-dark-900/95 backdrop-blur-xl rounded-2xl sm:rounded-3xl shadow-2xl border border-dark-800 w-full max-w-sm sm:max-w-md max-h-[56vh] sm:max-h-[48vh] overflow-hidden flex flex-col animate-scaleIn"
+      >
+        {/* Header */}
+        <div className="bg-gradient-to-r from-primary-600/20 to-secondary-600/20 backdrop-blur-sm px-3 sm:px-4 py-2 sm:py-3 border-b border-dark-800 flex items-center justify-between flex-shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3">
+            {getIcon()}
+            <div>
+              <h2 className="text-base sm:text-xl font-bold text-white">{getTitle()}</h2>
+              <p className="text-xs text-dark-400 hidden sm:block">Revisa los detalles antes de continuar</p>
+            </div>
+          </div>
+          <button
+            onClick={onCancel}
+            className="p-2 sm:p-2.5 rounded-xl bg-danger-500/10 hover:bg-danger-500/20 text-danger-300 hover:text-danger-100 transition-all border border-danger-400/20 hover:scale-105 active:scale-95"
+            title="Cerrar"
+          >
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
+          </button>
+        </div>
+
+        {/* Content - Scrollable */}
+        <div className="px-3 sm:px-5 py-2 sm:py-3 space-y-2 sm:space-y-3 overflow-y-auto flex-1 max-h-[40vh] sm:max-h-[32vh]">
+          {/* Confirmation Message */}
+          {confirmation_message && (
+            <div className="bg-warning-500/10 border border-warning-500/30 rounded-lg sm:rounded-xl p-3 sm:p-4 backdrop-blur-sm">
+              <p className="text-xs sm:text-sm text-warning-200 whitespace-pre-wrap leading-relaxed">
+                {confirmation_message.split('\n').map((line, i) => {
+                  // Remove "---" separator lines
+                  if (line.trim() === '---') return null
+                  return <span key={i}>{line}<br /></span>
+                })}
+              </p>
+            </div>
+          )}
+
+          {/* Action Details Card */}
+          <div>
+            <h3 className="text-xs sm:text-sm font-semibold text-dark-400 mb-2 sm:mb-3 uppercase tracking-wide">
+              Detalles de la acción
+            </h3>
+            {renderActionDetails()}
+          </div>
+
+          {/* Warning */}
+          <div className="bg-warning-500/10 border border-warning-500/30 rounded-lg sm:rounded-xl p-3 sm:p-4 flex items-start gap-2 sm:gap-3">
+            <span className="text-lg sm:text-2xl flex-shrink-0">⚠️</span>
+            <div>
+              <p className="text-xs sm:text-sm font-medium text-warning-200">Importante</p>
+              <p className="text-xs text-warning-300/70 mt-1">
+                Esta acción se ejecutará inmediatamente al confirmar. Revisa cuidadosamente los detalles antes de continuar.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer - Action Buttons */}
+        <div className="sticky bottom-0 z-20 bg-dark-900/95 backdrop-blur-xl px-3 sm:px-4 py-2 sm:py-3 border-t border-dark-800 flex items-center justify-end gap-2 sm:gap-3 flex-shrink-0">
+          <button
+            onClick={onCancel}
+            className="px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg sm:rounded-xl bg-dark-700/50 hover:bg-dark-700 text-dark-400 hover:text-white transition-all border border-dark-600 flex items-center gap-1.5 sm:gap-2 font-medium text-xs sm:text-sm hover:scale-105 active:scale-95"
+          >
+            <XCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <span className="hidden sm:inline">Cancelar</span>
+            <span className="sm:hidden">X</span>
+          </button>
+
+          {!isEditMode ? (
+            <>
+              <button
+                onClick={() => setIsEditMode(true)}
+                className="px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg sm:rounded-xl bg-primary-600/20 hover:bg-primary-600/30 text-primary-300 hover:text-primary-100 transition-all border border-primary-500/30 flex items-center gap-1.5 sm:gap-2 font-medium text-xs sm:text-sm hover:scale-105 active:scale-95"
+              >
+                <Edit2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                Editar
+              </button>
+
+              <button
+                onClick={() => {
+                  console.log('✅ ConfirmationModal - Confirmar clicked (no edit mode)')
+                  console.log('   - pendingAction:', pendingAction)
+                  onConfirm()
+                }}
+                className="px-4 sm:px-5 py-2 sm:py-2.5 rounded-lg bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 text-white transition-all shadow-lg shadow-green-500/20 hover:shadow-green-500/40 flex items-center gap-1.5 sm:gap-2 font-medium text-xs sm:text-sm"
+              >
+                <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                <span className="hidden sm:inline">Confirmar y Ejecutar</span>
+                <span className="sm:hidden">Confirmar</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => setIsEditMode(false)}
+                className="px-4 py-2.5 rounded-lg bg-gray-600/20 hover:bg-gray-600/30 text-gray-300 hover:text-white transition-all border border-gray-500/30 flex items-center gap-2 font-medium"
+              >
+                Cancelar Edición
+              </button>
+
+              <button
+                onClick={() => {
+                  // Save edited params and confirm - create clean object
+                  const updatedAction = {
+                    action_type: pendingAction?.action_type || 'send_email',
+                    action_params: { ...editedParams },  // Clone editedParams
+                    confirmation_message: pendingAction?.confirmation_message || ''
+                  }
+                  console.log('✏️ ConfirmationModal - Edit mode updatedAction:', updatedAction)
+                  setIsEditMode(false)
+                  onConfirm(updatedAction)
+                }}
+                className="px-5 py-2.5 rounded-lg bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 text-white transition-all shadow-lg shadow-green-500/20 hover:shadow-green-500/40 flex items-center gap-2 font-medium"
+              >
+                <Save className="w-4 h-4" />
+                Guardar y Enviar
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      <style>
+        {`
+          @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+          }
+
+          @keyframes slideUp {
+            from {
+              opacity: 0;
+              transform: translateY(20px);
+            }
+            to {
+              opacity: 1;
+              transform: translateY(0);
+            }
+          }
+        `}
+      </style>
+    </div>
+  )
+}
