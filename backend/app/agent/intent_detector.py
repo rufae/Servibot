@@ -22,7 +22,11 @@ class IntentDetector:
     QUERY_DOCUMENT_KEYWORDS = [
         "según el", "segun el", "en el archivo", "en el documento",
         "qué dice el", "que dice el", "busca en", "encuentra en",
-        "lee el", "revisa el", "consulta el", "dime que dice"
+        "lee el", "revisa el", "consulta el", "dime que dice",
+        "buscando en los documentos", "buscando en documentos",
+        "buscar en los documentos", "buscar en documentos",
+        "busques quien es", "busca quien es", "quien es",
+        "quiero que busques", "busca en los documentos"
     ]
     
     SELF_REFERENCE_KEYWORDS = [
@@ -46,6 +50,72 @@ class IntentDetector:
     ]
     
     def detect_intent(self, message: str) -> Dict[str, any]:
+        """
+        Detect user intent using LLM instead of keywords.
+        """
+        msg_lower = message.lower()
+        
+        # Check for self-reference (highest priority)
+        if self._contains_keywords(msg_lower, self.SELF_REFERENCE_KEYWORDS):
+            logger.info(f"Intent detected: SELF_REFERENCE")
+            return {
+                "intent": "self_reference",
+                "needs_rag": False,
+                "confidence": 0.95,
+                "action_type": None,
+                "reasoning": "User asking about ServiBot"
+            }
+        
+        # Use LLM to classify intent
+        from app.llm.local_client import classify_user_intent
+        try:
+            llm_result = classify_user_intent(message)
+            action_type_raw = llm_result.get('action_type', 'general')
+            # Clean action_type - take first word if it contains spaces/colons
+            action_type = action_type_raw.split(':')[0].split()[0].strip().lower()
+            needs_rag = llm_result.get('needs_rag', False)
+            reasoning = llm_result.get('reasoning', 'LLM classification')
+            
+            # Map action_type to intent
+            if action_type in ['email', 'calendar']:
+                intent = 'action'
+                confidence = 0.9
+                needs_rag = False  # Force disable RAG for actions
+            elif action_type == 'document':
+                intent = 'create'
+                confidence = 0.85
+            elif action_type == 'query':
+                intent = 'query_docs'
+                needs_rag = True  # Force RAG for queries
+                confidence = 0.9
+            else:
+                intent = 'general'
+                confidence = 0.7
+            
+            logger.info(f"Intent: {intent.upper()} (type={action_type}, rag={needs_rag})")
+            return {
+                "intent": intent,
+                "needs_rag": needs_rag,
+                "confidence": confidence,
+                "action_type": action_type if action_type != 'general' else None,
+                "reasoning": reasoning
+            }
+        except Exception as e:
+            logger.error(f"LLM intent failed: {e}, fallback")
+            return self._fallback_keyword_detection(message)
+    
+    def _fallback_keyword_detection(self, message: str) -> Dict[str, any]:
+        """Fallback if LLM fails."""
+        msg_lower = message.lower()
+        
+        if any(kw in msg_lower for kw in ['correo', 'email', 'mail', 'mand']):
+            return {"intent": "action", "needs_rag": False, "confidence": 0.8, "action_type": "email", "reasoning": "Email fallback"}
+        if any(kw in msg_lower for kw in ['evento', 'calendario', 'agenda']):
+            return {"intent": "action", "needs_rag": False, "confidence": 0.8, "action_type": "calendar", "reasoning": "Calendar fallback"}
+        if any(kw in msg_lower for kw in ['busca', 'quien', 'dime']):
+            return {"intent": "query_docs", "needs_rag": True, "confidence": 0.75, "action_type": "query", "reasoning": "Query fallback"}
+        
+        return {"intent": "general", "needs_rag": True, "confidence": 0.6, "action_type": None, "reasoning": "Ambiguous fallback with RAG"}
         """
         Detect user intent from message.
         

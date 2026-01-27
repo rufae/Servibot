@@ -1,32 +1,54 @@
 """
 Agent Planner Module
-Generates execution plans from user objectives.
+Generates structured execution plans from user objectives.
 """
 from typing import List, Dict, Any, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from enum import Enum
 import logging
+import json
 
 logger = logging.getLogger(__name__)
 
 
+class StepStatus(str, Enum):
+    """Status of a plan step"""
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+class RiskLevel(str, Enum):
+    """Risk level of a plan"""
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
 class SubTask(BaseModel):
     """Represents a subtask in the execution plan."""
-    step: int
-    action: str
-    tool: Optional[str] = None
-    estimated_time_minutes: int = 1
-    requires_confirmation: bool = False
-    dependencies: List[int] = []
-    success_criteria: str = ""
+    step: int = Field(..., description="Step number (1-indexed)")
+    action: str = Field(..., description="Description of action to perform")
+    tool: Optional[str] = Field(None, description="Tool to use (e.g., 'calendar', 'email', 'file_writer')")
+    estimated_time_minutes: int = Field(1, description="Estimated time in minutes")
+    requires_confirmation: bool = Field(False, description="Whether user confirmation is needed")
+    dependencies: List[int] = Field(default_factory=list, description="Steps that must complete first")
+    success_criteria: str = Field("", description="How to verify success")
+    status: StepStatus = Field(StepStatus.PENDING, description="Current status")
+    result: Optional[str] = Field(None, description="Result after execution")
+    error: Optional[str] = Field(None, description="Error message if failed")
 
 
 class ExecutionPlan(BaseModel):
     """Complete execution plan for a user objective."""
-    objective: str
-    subtasks: List[SubTask]
-    total_estimated_time: int
-    requires_user_confirmation: bool
-    risk_level: str = "low"  # low, medium, high
+    objective: str = Field(..., description="User's original objective")
+    subtasks: List[SubTask] = Field(..., description="Ordered list of subtasks")
+    total_estimated_time: int = Field(..., description="Total estimated time in minutes")
+    requires_user_confirmation: bool = Field(..., description="Whether plan needs approval")
+    risk_level: RiskLevel = Field(RiskLevel.LOW, description="Overall risk level")
+    reasoning: str = Field("", description="Explanation of the plan")
 
 
 class Planner:
@@ -66,8 +88,16 @@ class Planner:
         obj_lower = objective.lower()
         
         # PRIORITY 1: Email SEND operation (highest priority)
-        is_email_send = any(kw in obj_lower for kw in ["enviar", "envia", "envía", "mandar", "manda", "send"]) and \
-                        any(kw in obj_lower for kw in ["correo", "email", "mensaje", "mail"])
+        # Detect explicit send verbs OR pattern "correo/email/mensaje a [nombre]"
+        has_send_verb = any(kw in obj_lower for kw in ["enviar", "envia", "envía", "mandar", "manda", "send"])
+        has_email_word = any(kw in obj_lower for kw in ["correo", "email", "mensaje", "mail"])
+        # Pattern: "correo a Ana", "email a Juan", "mensaje a María"
+        has_recipient_pattern = any(pattern in obj_lower for pattern in [
+            "correo a ", "correo para ", "email a ", "email para ",
+            "mensaje a ", "mensaje para ", "mail a ", "mail para "
+        ])
+        
+        is_email_send = (has_send_verb and has_email_word) or has_recipient_pattern
         
         # Calendar query: asking about events or schedule
         is_calendar_query = any(kw in obj_lower for kw in [
@@ -89,24 +119,50 @@ class Planner:
                 is_metadata_query = True
         
         # File generation: user wants to create/export something
-        is_file_generation = any(kw in obj_lower for kw in [
-            "generar", "crear", "exportar", "hacer", "generate", "create", "export",
-            "pdf", "excel", "documento", "archivo", "reporte", "informe"
-        ])
+        # Priority: if user explicitly mentions generating files, this takes precedence
+        # Use shorter verb forms to catch all conjugations: genera/generar, crea/crear, etc.
+        has_file_action = any(kw in obj_lower for kw in ["genera", "generar", "crea", "crear", "exporta", "exportar", "haz", "hacer", "generate", "create", "export"])
+        has_file_type = any(kw in obj_lower for kw in ["pdf", "excel", "documento", "archivo", "reporte", "informe", "spreadsheet", "hoja"])
+        is_file_generation = has_file_action and has_file_type
+        
+        # Debug logging
+        logger.info(f"🔍 Intent Detection:")
+        logger.info(f"   has_file_action: {has_file_action}")
+        logger.info(f"   has_file_type: {has_file_type}")
+        logger.info(f"   is_file_generation: {is_file_generation}")
+        logger.info(f"   is_calendar_query: {is_calendar_query}")
+        logger.info(f"   is_email_send: {is_email_send}")
+        logger.info(f"   is_email_query: {is_email_query}")
+        logger.info(f"   is_metadata_query: {is_metadata_query}")
         
         # Information query: user asking questions about content
+        # Only if NOT generating a file
         is_info_query = any(kw in obj_lower for kw in [
             "qué", "que", "cuál", "cual", "cómo", "como", "quién", "quien", "dónde", "donde",
             "cuándo", "cuando", "por qué", "porque", "dame", "dime", "explica", "muestra",
             "what", "which", "how", "who", "where", "when", "why", "tell", "show", "explain"
-        ]) and not is_metadata_query and not is_calendar_query and not is_email_query
+        ]) and not is_metadata_query and not is_calendar_query and not is_email_query and not is_file_generation
+        
+        logger.info(f"   is_info_query: {is_info_query}")
         
         # Generate appropriate plan based on query type
-        if is_calendar_query:
-            # Calendar plan: list upcoming events
+        # Handle combined queries (email + calendar) by returning multiple subtasks
+        # is_send should use is_email_send that was already detected with higher priority
+        is_send = is_email_send
+
+        if is_email_query and is_calendar_query and not is_send:
+            # User asked for both emails and events (e.g., "mis últimos 3 correos y los próximos 3 eventos")
             subtasks = [
                 SubTask(
                     step=1,
+                    action="List recent emails from inbox",
+                    tool="email",
+                    estimated_time_minutes=1,
+                    requires_confirmation=False,
+                    success_criteria="Email messages retrieved"
+                ),
+                SubTask(
+                    step=2,
                     action="List upcoming calendar events",
                     tool="calendar",
                     estimated_time_minutes=1,
@@ -115,11 +171,8 @@ class Planner:
                 )
             ]
         elif is_email_query:
-            # Email plan: detect if it's SEND or LIST
-            is_send = any(kw in obj_lower for kw in ["enviar", "envia", "envía", "mandar", "manda", "send"])
-            
+            # Email-only intent (could be send or list)
             if is_send:
-                # Send email operation
                 subtasks = [
                     SubTask(
                         step=1,
@@ -131,7 +184,6 @@ class Planner:
                     )
                 ]
             else:
-                # List emails operation
                 subtasks = [
                     SubTask(
                         step=1,
@@ -142,6 +194,18 @@ class Planner:
                         success_criteria="Email messages retrieved"
                     )
                 ]
+        elif is_calendar_query:
+            # Calendar-only intent
+            subtasks = [
+                SubTask(
+                    step=1,
+                    action="List upcoming calendar events",
+                    tool="calendar",
+                    estimated_time_minutes=1,
+                    requires_confirmation=False,
+                    success_criteria="Calendar events retrieved"
+                )
+            ]
         elif is_metadata_query:
             # Simple plan for listing files
             subtasks = [
@@ -156,6 +220,7 @@ class Planner:
             ]
         elif is_file_generation:
             # Plan for generating files (PDF, Excel, etc.)
+            logger.info(f"🎯 File generation detected in message: {objective[:100]}")
             subtasks = [
                 SubTask(
                     step=1,

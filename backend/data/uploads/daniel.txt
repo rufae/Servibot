@@ -1,0 +1,22 @@
+Nombre: Daniel Torres
+Edad: 35 años
+Profesión: Ingeniero de software y desarrollador de videojuegos
+Ciudad: Madrid, España
+
+Biografía:
+Daniel es un apasionado de la tecnología y los videojuegos desde pequeño. Trabaja como ingeniero de software especializado en desarrollo de videojuegos independientes, combinando programación con creatividad artística. Siempre está buscando optimizar procesos y aprender nuevas herramientas tecnológicas.  
+
+Personalidad:
+Daniel es analítico, curioso y perseverante. Le gusta enfrentar desafíos complejos y encontrar soluciones eficientes. Aunque puede ser perfeccionista, disfruta colaborando con equipos multidisciplinares.  
+
+Intereses:
+- Desarrollo de videojuegos (Unity, Unreal Engine, Godot)
+- Programación en Python, C# y C++
+- Inteligencia artificial aplicada a juegos y simulaciones
+- Lectura de ciencia ficción y literatura tecnológica
+- Deportes al aire libre y senderismo
+
+Objetivos:
+- Crear un videojuego innovador que combine narrativa y mecánicas de IA.
+- Mantenerse actualizado en tecnologías de IA, gráficos y motores de juego.
+- Desarrollar herramientas propias para automatizar procesos de programación y testing.

@@ -6,7 +6,7 @@ import logging
 from typing import Optional
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Header
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from datetime import timedelta
@@ -17,7 +17,7 @@ from app.services.google_oauth import (
     exchange_code_for_credentials,
     save_credentials_for_user
 )
-from app.auth.jwt_handler import create_access_token
+from app.auth.jwt_handler import create_access_token, verify_token
 from app.db.sqlite_client import get_sqlite_client
 from app.core.config import settings
 
@@ -132,8 +132,10 @@ async def oauth_callback(
             picture=picture
         )
         
-        # Save credentials to database (now associated with user DB id)
-        token_id = save_credentials_for_user(credentials, str(user_data['id']), sub)
+        # Save credentials to database using DB user_id (not state parameter)
+        db_user_id = str(user_data['id'])
+        logger.info(f"💾 Saving OAuth token for user_id={db_user_id}")
+        token_id = save_credentials_for_user(credentials, db_user_id, sub)
         
         # Create JWT session token
         access_token = create_access_token(
@@ -161,18 +163,31 @@ async def oauth_callback(
 
 @router.get("/status")
 async def check_oauth_status(
-    user_id: str = Query(default="default_user", description="User identifier")
+    authorization: Optional[str] = Header(None)
 ):
     """
     Check if user has valid OAuth credentials.
-    
-    Args:
-        user_id: User identifier
+    Extracts user_id from JWT token in Authorization header.
     
     Returns:
         Status of OAuth connection
     """
     from app.services.google_oauth import get_credentials_for_user
+    
+    # Extract user_id from JWT
+    user_id = "default_user"
+    if authorization:
+        try:
+            token = authorization.replace('Bearer ', '') if 'Bearer ' in authorization else authorization
+            uid = verify_token(token)
+            if uid:
+                db = get_sqlite_client()
+                user = db.get_user_by_id(int(uid))
+                if user:
+                    user_id = str(user.get('id'))
+                    logger.info(f"✅ Status check for user_id: {user_id}")
+        except Exception as e:
+            logger.warning(f"Could not extract user from Authorization header: {e}")
     
     credentials = get_credentials_for_user(user_id)
     

@@ -62,3 +62,10 @@ credentials.json
 token.json
 *.pem
 *.key
+
+# Git backups
+.git_old_*/
+.git_backup_*/
+
+# Vite cache
+frontend/.vite/

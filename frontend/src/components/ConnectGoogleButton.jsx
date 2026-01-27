@@ -18,7 +18,7 @@ export default function ConnectGoogleButton() {
   }, [])
 
   const checkGoogleStatus = async () => {
-    const result = await authService.getGoogleStatus(userId)
+    const result = await authService.getGoogleStatus()
     if (result.success && result.data.connected) {
       setGoogleConnected(true, result.data.email)
     }
@@ -56,7 +56,7 @@ export default function ConnectGoogleButton() {
       }
 
       // Check backend status
-      const result = await authService.getGoogleStatus(userId)
+      const result = await authService.getGoogleStatus()
       
       if (result.success && result.data.connected) {
         // Success! Close popup and update state
@@ -91,7 +91,7 @@ export default function ConnectGoogleButton() {
       text: 'Necesitarás volver a conectar para usar Calendar y Gmail',
       icon: 'warning',
       showCancelButton: true,
-      confirmButtonColor: '#ef4444',
+      confirmButtonColor: '#3B82F6',
       cancelButtonColor: '#6b7280',
       confirmButtonText: 'Sí, desconectar',
       cancelButtonText: 'Cancelar',
@@ -158,13 +158,13 @@ export default function ConnectGoogleButton() {
         <button
           onClick={handleDisconnect}
           disabled={isConnecting}
-          className="w-full px-4 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full px-4 py-2 bg-danger-500/10 hover:bg-danger-500/20 border border-danger-500/30 text-danger-400 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isConnecting ? 'Desconectando...' : 'Desconectar Google'}
         </button>
 
         {error && (
-          <div className="px-3 py-2 bg-red-500/10 border border-red-500/30 rounded text-sm text-red-400">
+          <div className="px-3 py-2 bg-danger-500/10 border border-danger-500/30 rounded text-sm text-danger-400">
             {error}
           </div>
         )}
@@ -201,7 +201,7 @@ export default function ConnectGoogleButton() {
       </button>
 
       {error && (
-        <div className="px-3 py-2 bg-red-500/10 border border-red-500/30 rounded text-sm text-red-400">
+        <div className="px-3 py-2 bg-danger-500/10 border border-danger-500/30 rounded text-sm text-danger-400">
           {error}
         </div>
       )}

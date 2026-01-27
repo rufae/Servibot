@@ -2,17 +2,21 @@
 Chat API Endpoint
 Handles user chat interactions with the ServiBot agent.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any, Union
-from datetime import datetime
+from datetime import datetime, timedelta
+import re
 import logging
 
 from app.agent.planner import planner
 from app.agent.executor import executor
 from app.agent.evaluator import evaluator
+from app.agent.intent_detector import get_intent_detector
 from app.core.config import settings
 from app.llm.local_client import summarize_texts
+from app.auth.jwt_handler import verify_token
+from app.db.sqlite_client import get_sqlite_client
 import os
 
 logger = logging.getLogger(__name__)
@@ -24,6 +28,9 @@ class ChatMessage(BaseModel):
     message: str
     conversation_id: Optional[str] = None
     context: Optional[Dict[str, Any]] = None
+    confirmation_action: Optional[str] = None  # 'confirm', 'cancel', or 'edit'
+    pending_action_data: Optional[Dict[str, Any]] = None  # Data for confirmed action
+    conversation_history: Optional[List[Dict[str, str]]] = None  # Previous messages for context (for conversational memory)
 
 
 class ChatResponse(BaseModel):
@@ -37,10 +44,11 @@ class ChatResponse(BaseModel):
     # `sources` can be either list of strings (filenames) or list of dicts with document data
     sources: Optional[Union[List[str], List[Dict[str, Any]]]] = None
     generated_file: Optional[Dict[str, str]] = None  # File info if executor generated one
+    pending_confirmation: Optional[Dict[str, Any]] = None  # Pending action requiring confirmation
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(message: ChatMessage):
+async def chat(message: ChatMessage, authorization: Optional[str] = Header(None)):
     """
     Main chat endpoint that processes user messages through the agent.
 
@@ -51,28 +59,250 @@ async def chat(message: ChatMessage):
     4. Return structured response with plan, execution results and evaluation.
     """
     try:
-        logger.info(f"Received chat message: {message.message[:50]}...")
+        logger.info(f"Received chat message: {message.message[:50] if message.message else '(confirmation)'}...")
+        
+        # Prepare execution context with conversation history
+        execution_context = {}
+        if message.conversation_history:
+            execution_context["conversation_history"] = message.conversation_history
+            logger.info(f"📚 Loaded {len(message.conversation_history)} messages for conversational context")
+        
+        # Handle confirmation responses (check BEFORE generating plan)
+        if message.confirmation_action and message.pending_action_data:
+            if message.confirmation_action == 'cancel':
+                return ChatResponse(
+                    response="✅ Acción cancelada.",
+                    conversation_id=message.conversation_id or f"conv_{datetime.utcnow().timestamp()}",
+                    timestamp=datetime.utcnow().isoformat()
+                )
+            elif message.confirmation_action == 'edit':
+                # User wants to edit - provide context for re-drafting
+                # Extract the pending action to help user modify it
+                pending = message.pending_action_data or {}
+                context_msg = ""
+                if pending.get('action_type') == 'send_email':
+                    params = pending.get('action_params', {})
+                    context_msg = f"El correo actual es para {params.get('to', 'destinatario')} con asunto '{params.get('subject', 'sin asunto')}' y mensaje: {params.get('body', 'sin mensaje')}. ¿Qué quieres cambiar?"
+                else:
+                    context_msg = "Por favor, indícame los cambios que quieres realizar."
+                
+                return ChatResponse(
+                    response=f"✏️ {context_msg}",
+                    conversation_id=message.conversation_id or f"conv_{datetime.utcnow().timestamp()}",
+                    timestamp=datetime.utcnow().isoformat(),
+                    pending_confirmation=pending  # Keep pending action for context
+                )
+            elif message.confirmation_action == 'confirm':
+                # Bypass planner: build a minimal ExecutionPlan from pending_action_data
+                pending = message.pending_action_data or {}
+                action_params = pending.get('action_params', {})
+                
+                # Determine tool and action based on pending keys
+                from app.agent.planner import SubTask, ExecutionPlan
+                subtasks = []
+                action_type = pending.get('action_type', '')
+                
+                if action_params.get('to') or action_type == 'send_email':
+                    # Email send
+                    subtasks = [
+                        SubTask(
+                            step=1,
+                            action="Send email (confirmed)",
+                            tool="email",
+                            estimated_time_minutes=1,
+                            requires_confirmation=False,
+                            success_criteria="Email sent successfully"
+                        )
+                    ]
+                elif action_params.get('event_id') and action_type == 'delete_calendar_event':
+                    # Delete calendar event
+                    subtasks = [
+                        SubTask(
+                            step=1,
+                            action="Delete calendar event (confirmed)",
+                            tool="calendar",
+                            estimated_time_minutes=1,
+                            requires_confirmation=False,
+                            success_criteria="Event deleted"
+                        )
+                    ]
+                elif action_params.get('event_id') and action_params.get('summary') and action_type == 'update_calendar_event':
+                    # Update calendar event
+                    subtasks = [
+                        SubTask(
+                            step=1,
+                            action="Update calendar event (confirmed)",
+                            tool="calendar",
+                            estimated_time_minutes=1,
+                            requires_confirmation=False,
+                            success_criteria="Event updated"
+                        )
+                    ]
+                elif action_params.get('summary') and action_params.get('start_time'):
+                    # Create calendar event
+                    subtasks = [
+                        SubTask(
+                            step=1,
+                            action="Create calendar event (confirmed)",
+                            tool="calendar",
+                            estimated_time_minutes=1,
+                            requires_confirmation=False,
+                            success_criteria="Event created"
+                        )
+                    ]
+                else:
+                    # Unknown pending action, fallback to planner
+                    subtasks = []
 
-        # 1) Generate plan
+                if subtasks:
+                    plan = ExecutionPlan(
+                        objective=f"Confirmed action: {pending.get('action_type', 'user_confirm')}",
+                        subtasks=subtasks,
+                        total_estimated_time=sum(t.estimated_time_minutes for t in subtasks),
+                        requires_user_confirmation=False,
+                        risk_level="low"
+                    )
+
+                    # Extract user_id from JWT token
+                    user_id = "default_user"  # Fallback
+                    try:
+                        if authorization:
+                            token = authorization.replace('Bearer ', '') if 'Bearer ' in authorization else authorization
+                            uid = verify_token(token)
+                            if uid:
+                                db = get_sqlite_client()
+                                user = db.get_user_by_id(int(uid))
+                                if user:
+                                    user_id = str(user.get('id'))  # Convert to string
+                                    logger.info(f"✅ Using user_id: {user_id} for confirmed action")
+                    except Exception as e:
+                        logger.warning(f"Could not extract user_id: {e}")
+                        user_id = "default_user"
+
+                    # Prepare execution context to include confirmation data
+                    execution_context = {
+                        "user_message": message.message,
+                        "original_context": message.context or {},
+                        "confirmation_action": message.confirmation_action,
+                        "pending_action_data": pending,
+                        "user_id": user_id  # Add user_id for tools
+                    }
+
+                    exec_results = await executor.execute_plan(plan, user_confirmations={1: True}, context=execution_context)
+                    evaluation = evaluator.evaluate_results(exec_results)
+
+                    # Prepare response from exec_results
+                    response_text = "Acción confirmada y ejecutada."
+                    # Check for email send results
+                    for result in exec_results.get('results', []):
+                        if result.get('tool_used') == 'email' and isinstance(result.get('result'), dict):
+                            rd = result.get('result')
+                            if rd.get('success') and rd.get('message_id'):
+                                response_text = f"✅ Correo enviado exitosamente: {rd.get('message_id')}"
+                            elif rd.get('success') and rd.get('message'):
+                                response_text = f"✅ {rd.get('message')}"
+                        elif result.get('tool_used') == 'calendar' and isinstance(result.get('result'), dict):
+                            rd = result.get('result')
+                            if action_type == 'delete_calendar_event' and rd.get('success'):
+                                response_text = f"✅ Evento eliminado del calendario"
+                            elif action_type == 'update_calendar_event' and rd.get('success'):
+                                response_text = f"✅ Evento actualizado en el calendario"
+                            elif rd.get('success') and rd.get('event_id'):
+                                response_text = f"✅ Evento creado exitosamente en el calendario"
+                            elif rd.get('success'):
+                                response_text = f"✅ Operación de calendario completada"
+                            elif rd.get('error'):
+                                response_text = f"❌ Error: {rd.get('error')}"
+
+                    return ChatResponse(
+                        response=response_text,
+                        conversation_id=message.conversation_id or f"conv_{datetime.utcnow().timestamp()}",
+                        timestamp=datetime.utcnow().isoformat(),
+                        plan=[s.model_dump() for s in plan.subtasks],
+                        execution=exec_results,
+                        evaluation=evaluation
+                    )
+        
+        # For empty messages without confirmation, return early
+        if not message.message or not message.message.strip():
+            return ChatResponse(
+                response="Por favor, envía un mensaje.",
+                conversation_id=message.conversation_id or f"conv_{datetime.utcnow().timestamp()}",
+                timestamp=datetime.utcnow().isoformat()
+            )
         plan = planner.generate_plan(message.message, message.context)
 
         # 2) Build auto-confirmations (confirm all steps)
         user_confirmations: Dict[int, bool] = {s.step: True for s in plan.subtasks}
 
         # 3) Prepare context for executor (will include RAG results if available)
-        execution_context = {
+        exec_context = {
             "user_message": message.message,
-            "original_context": message.context or {}
+            "original_context": message.context or {},
+            "confirmation_action": message.confirmation_action,
+            "pending_action_data": message.pending_action_data,
         }
+        
+        # Add conversation history from prepared context
+        if execution_context.get("conversation_history"):
+            exec_context["conversation_history"] = execution_context["conversation_history"]
+
+        # If Authorization header is provided and valid, attach minimal user info
+        user_info = None
+        user_id = "default_user"  # Fallback
+        try:
+            if authorization:
+                token = authorization.replace('Bearer ', '') if 'Bearer ' in authorization else authorization
+                uid = verify_token(token)
+                if uid:
+                    db = get_sqlite_client()
+                    user = db.get_user_by_id(int(uid))
+                    if user:
+                        user_info = {
+                            "id": user.get('id'),
+                            "email": user.get('email'),
+                            "name": user.get('name'),
+                            # Do NOT include tokens or credentials here
+                        }
+                        user_id = str(user.get('id'))  # Convert to string
+                        exec_context['user'] = user_info
+                        exec_context['user_id'] = user_id  # Add user_id for tools
+                        logger.info(f"✅ Using user_id: {user_id} for chat execution")
+        except Exception as e:
+            # Fail silently: do not break chat for auth errors
+            logger.warning(f"Auth error in chat: {e}")
+            user_info = None
+            exec_context['user_id'] = user_id  # Set fallback
 
         # 3) Execute the plan
-        exec_results = await executor.execute_plan(plan, user_confirmations=user_confirmations, context=execution_context)
+        exec_results = await executor.execute_plan(plan, user_confirmations=user_confirmations, context=exec_context)
+        
+        # Check if any action requires confirmation
+        pending_confirmation = None
+        for result in exec_results.get("results", []):
+            if result.get("status") == "pending_confirmation":
+                pending_confirmation = result.get("result")
+                logger.info(f"🔔 Action requires confirmation: {pending_confirmation.get('action_type')}")
+                break
+        
+        # If confirmation is pending, return early with confirmation request
+        if pending_confirmation:
+            confirmation_msg = pending_confirmation.get("confirmation_message", "¿Quieres continuar con esta acción?")
+            return ChatResponse(
+                response=confirmation_msg,
+                conversation_id=message.conversation_id or f"conv_{datetime.utcnow().timestamp()}",
+                timestamp=datetime.utcnow().isoformat(),
+                plan=[s.model_dump() for s in plan.subtasks],
+                execution=exec_results,
+                pending_confirmation=pending_confirmation
+            )
 
         # 4) Evaluate results
         evaluation = evaluator.evaluate_results(exec_results)
 
         # Check if executor returned data from calendar/email tools
         tool_response = None
+        tool_response_parts = []
         for result in exec_results.get("results", []):
             if result.get("status") == "success":
                 result_data = result.get("result", {})
@@ -101,7 +331,7 @@ async def chat(message: ChatMessage):
                                     event_list.append(f"• **{summary}** - {start}")
                             
                             count = result_data.get("count", len(events))
-                            tool_response = f"📅 Tienes {count} eventos próximos:\n\n" + "\n".join(event_list)
+                            tool_response_parts.append(f"📅 Tienes {count} eventos próximos:\n\n" + "\n".join(event_list))
                     
                     elif "event_id" in result_data and "start" in result_data:
                         # Event created
@@ -117,13 +347,13 @@ async def chat(message: ChatMessage):
                             formatted = start
                         
                         html_link = result_data.get("html_link", "")
-                        tool_response = f"✅ Evento creado exitosamente:\n\n**{summary}**\n📅 {formatted}\n\n🔗 [Ver en Google Calendar]({html_link})"
+                        tool_response_parts.append(f"✅ Evento creado exitosamente:\n\n**{summary}**\n📅 {formatted}\n\n🔗 [Ver en Google Calendar]({html_link})")
                     
                     elif "event_id" in result_data and "summary" in result_data:
                         # Event updated
                         summary = result_data.get("summary", "Evento")
                         html_link = result_data.get("html_link", "")
-                        tool_response = f"✅ Evento actualizado exitosamente:\n\n**{summary}**\n\n🔗 [Ver en Google Calendar]({html_link})"
+                        tool_response_parts.append(f"✅ Evento actualizado exitosamente:\n\n**{summary}**\n\n🔗 [Ver en Google Calendar]({html_link})")
                 
                 # Email tool: format emails for response
                 elif tool_used == "email" and isinstance(result_data, dict) and result_data.get("success"):
@@ -132,14 +362,16 @@ async def chat(message: ChatMessage):
                         # Email sent successfully
                         to = result_data.get("to", "")
                         subject = result_data.get("subject", "")
-                        tool_response = f"✅ Correo enviado exitosamente:\n\n**Para:** {to}\n**Asunto:** {subject}"
+                        tool_response_parts.append(f"✅ Correo enviado exitosamente:\n\n**Para:** {to}\n**Asunto:** {subject}")
                     
                     elif "messages" in result_data:
                         # List emails
                         messages = result_data.get("messages", [])
                         if messages:
                             email_list = []
-                            for msg in messages[:10]:  # Limit to 10 emails
+                            # Try to respect requested limit if provided in result_data or show up to 10
+                            display_limit = min(result_data.get("count", len(messages)), 10)
+                            for msg in messages[:display_limit]:
                                 sender = msg.get("from", "Desconocido")
                                 subject = msg.get("subject", "Sin asunto")
                                 date = msg.get("date", "")
@@ -147,7 +379,11 @@ async def chat(message: ChatMessage):
                                 email_list.append(f"• **De:** {sender}\n  **Asunto:** {subject}\n  **Fecha:** {date}\n  _{snippet[:100]}..._")
                             
                             count = result_data.get("count", len(messages))
-                            tool_response = f"📧 Tienes {count} correos recientes:\n\n" + "\n\n".join(email_list)
+                            tool_response_parts.append(f"📧 Tienes {count} correos recientes:\n\n" + "\n\n".join(email_list))
+
+        # After processing tool results, if we collected parts, join into a single tool_response
+        if tool_response_parts:
+            tool_response = "\n\n".join(tool_response_parts)
 
         # Quick intent check: if the user is asking about what documents/files are uploaded,
         # return the listing/count directly (no need to call RAG).
@@ -189,183 +425,203 @@ async def chat(message: ChatMessage):
             # Intent detection should never break the chat flow
             logger.debug("Docs-intent detection failed; proceeding with normal flow")
 
-        # 5) Try to enrich with RAG sources - ALWAYS query ChromaDB if documents are indexed
-        sources = None
-        try:
-            from app.rag.query import semantic_search
-            
-            # ALWAYS try RAG query to leverage uploaded documents
-            logger.info(f"Querying RAG for: {message.message[:100]}")
-            
-            try:
-                rag_results = semantic_search(
-                    query=message.message,
-                    top_k=5,
-                    collection_name="servibot_docs"
-                )
-                
-                if rag_results:
-                    sources = rag_results
-                    logger.info(f"RAG returned {len(sources)} results")
-                else:
-                    logger.info("RAG query returned no results")
-                    
-            except Exception as rag_err:
-                # Handle errors gracefully (e.g., no collection exists)
-                logger.info(f"RAG query error (likely no documents): {rag_err}")
-                sources = None
-                
-        except Exception as e:
-            # If RAG dependencies are missing or an error occurs, log and continue without sources
-            logger.warning(f"RAG enrichment failed: {e}")
-            sources = None
-
-        # 6) Prepare response
-        response_text = None
-        # If we have RAG sources, try to present them usefully.
-        if sources and len(sources) > 0:
-            try:
-                items = [s for s in sources if s and isinstance(s, dict)]
-
-                # Deduplicate by file_id/source
-                unique = {}
-                for s in items:
-                    md = s.get("metadata") or {}
-                    fid = md.get("file_id") or md.get("source") or None
-                    key = fid or (s.get("document")[:50] if s.get("document") else None)
-                    if key and key not in unique:
-                        unique[key] = s
-
-                # Heuristic: if the user asked specifically about documents/files,
-                # return the uploaded filenames / count instead of a fragment summary.
-                msg_l = (message.message or "").lower()
-                looks_for_docs = False
-                if "document" in msg_l or "archivo" in msg_l or "fichero" in msg_l:
-                    if any(k in msg_l for k in ["cuánt", "cuantos", "qué documentos", "que documentos", "dime que documentos", "qué archivos", "que archivos", "qué ficheros", "que ficheros"]):
-                        looks_for_docs = True
-
-                if looks_for_docs:
-                    # Prefer listing actual uploaded files from the upload directory
-                    try:
-                        up_dir = settings.UPLOAD_DIR
-                        files = []
-                        if up_dir and os.path.isdir(up_dir):
-                            for fn in os.listdir(up_dir):
-                                fp = os.path.join(up_dir, fn)
-                                if os.path.isfile(fp):
-                                    files.append(fn)
-                        if files:
-                            response_text = f"Hay {len(files)} documentos subidos: {', '.join(files)}"
-                        else:
-                            # Fallback to unique file ids from the RAG results
-                            uf = list(unique.keys())
-                            response_text = f"Hay {len(uf)} documentos (estimado): {', '.join(uf)}"
-                    except Exception as e:
-                        logger.debug(f"Error listing upload dir: {e}")
-                        uf = list(unique.keys())
-                        response_text = f"Hay {len(uf)} documentos (estimado): {', '.join(uf)}"
-                else:
-                    # Default behavior: summarize top-K fragments, but report unique files instead of raw fragment count
-                    # Sort by distance ascending if present
-                    sorted_items = sorted(unique.values(), key=lambda x: x.get("distance") if x.get("distance") is not None else float("inf"))
-                    TOP_K_SUMMARY = min(len(sorted_items), 5)
-                    top_items = sorted_items[:TOP_K_SUMMARY]
-                    texts = [t.get("document") for t in top_items if t.get("document")]
-
-                    summary = None
-                    if texts and settings.LM_USE_LOCAL_LM:
-                        try:
-                            # Create a prompt that uses the RAG context to answer the user query
-                            context = "\n\n---\n\n".join([f"Fragmento {i+1}:\n{t}" for i, t in enumerate(texts)])
-                            summary_prompt = f"""Basándote en la siguiente información de los documentos, responde a la pregunta del usuario de forma clara y concisa.
-
-Pregunta del usuario: {message.message}
-
-Información de los documentos:
-{context}
-
-Respuesta (directa y basada en la información proporcionada):"""
-                            
-                            summary = summarize_texts([summary_prompt], max_tokens=512)
-                            logger.info(f"Generated RAG-based answer via local LM: {summary[:100]}...")
-                        except Exception as e:
-                            logger.warning(f"Local LM summarization failed: {e}")
-
-                    if not summary and texts:
-                        # Fallback: just show concatenated fragments with context
-                        cleaned = []
-                        for i, t in enumerate(texts):
-                            if not t:
-                                continue
-                            s = " ".join(t.split())
-                            cleaned.append(f"📄 Fragmento {i+1}:\n{s[:400]}")
-                        summary = "\n\n".join(cleaned)
-                        logger.info("Using fallback concatenation for summary")
-
-                    source_names = [((s.get("metadata") or {}).get("source") or ((s.get("metadata") or {}).get("file_id"))) for s in top_items]
-                    source_names = [n for n in source_names if n]
-                    
-                    if summary:
-                        response_text = summary
-                    else:
-                        # If we couldn't generate any summary, show a generic message with source count
-                        response_text = f"Encontré {len(unique)} documentos relacionados con tu consulta, pero no pude extraer información específica."
-                    
-                    # Normalize sources to a simple list of filenames for the frontend
-                    sources = source_names
-                    
-                    # Add RAG content to execution context for tools (like file_writer)
-                    execution_context["rag_summary"] = summary
-                    execution_context["rag_sources"] = source_names
-                    execution_context["rag_texts"] = texts[:3]  # Top 3 fragments
-            except Exception as e:
-                logger.exception(f"Error building summary from sources: {e}")
-                response_text = None
+        # 5) Intelligent intent detection to determine if we should query RAG
+        intent_detector = get_intent_detector()
+        intent_result = intent_detector.detect_intent(message.message)
         
-        # Fallback if no response was generated
-        if not response_text:
-            # Priority 1: Check if we have tool response from calendar/email
-            if tool_response:
-                response_text = tool_response
-                sources = []  # Clear sources when using tools
+        logger.info(f"Intent detection: {intent_result['intent']} (confidence: {intent_result['confidence']}, needs_rag: {intent_result['needs_rag']})")
+        logger.debug(f"Intent reasoning: {intent_result['reasoning']}")
+        
+        should_query_rag = intent_result['needs_rag']
+        
+        sources = None
+        rag_context_text = None
+        
+        # Try to enrich with RAG sources if relevant
+        if should_query_rag:
+            try:
+                from app.rag.query import semantic_search
+                
+                # Detect if user mentions a specific file name
+                file_filter = None
+                file_mention = re.search(r'([\w-]+\.(?:pdf|txt|docx?|xlsx?|csv|md))', message.message, re.IGNORECASE)
+                if file_mention:
+                    mentioned_file = file_mention.group(1)
+                    file_id_stem = mentioned_file.rsplit('.', 1)[0]  # "CV.pdf" -> "CV"
+                    logger.info(f"📄 Detected file mention in chat: {mentioned_file} (file_id: {file_id_stem})")
+                    # Filter by source (exact match) OR file_id (stem)
+                    file_filter = {"$or": [
+                        {"file_id": {"$eq": file_id_stem}},
+                        {"source": {"$eq": mentioned_file}}
+                    ]}
+                
+                logger.info(f"RAG query for: {message.message[:100]}")
+                
+                try:
+                    rag_results = semantic_search(
+                        query=message.message,
+                        top_k=5,
+                        collection_name="servibot_docs",
+                        filter_metadata=file_filter
+                    )
+                    
+                    if rag_results:
+                        # Transform to include snippets and metadata
+                        sources = []
+                        for result in rag_results:
+                            doc_text = result.get("document", "")
+                            metadata = result.get("metadata", {})
+                            distance = result.get("distance", 1.0)
+                            
+                            source_name = metadata.get("source", metadata.get("file_id", "documento"))
+                            chunk_index = metadata.get("chunk_index", 0)
+                            
+                            # Only include if document text exists
+                            if doc_text:
+                                snippet = doc_text[:400].strip() + ("..." if len(doc_text) > 400 else "")
+                                sources.append({
+                                    "filename": source_name,
+                                    "snippet": snippet,
+                                    "chunk_index": chunk_index,
+                                    "distance": round(distance, 3)
+                                })
+                        
+                        logger.info(f"RAG returned {len(sources)} results with snippets")
+                        
+                        # Extract text snippets for context
+                        snippets = []
+                        for i, src in enumerate(sources[:3], 1):  # Top 3
+                            snippets.append(f"[Fragmento {i} de {src['filename']}]\n{src['snippet']}")
+                        
+                        if snippets:
+                            rag_context_text = "\n\n---\n\n".join(snippets)
+                    else:
+                        logger.info("RAG query returned no results")
+                        sources = []
+                        
+                except Exception as rag_err:
+                    logger.info(f"RAG query error (likely no documents): {rag_err}")
+                    sources = []
+                    
+            except Exception as e:
+                logger.warning(f"RAG enrichment failed: {e}")
+                sources = []
+        else:
+            logger.info(f"RAG skipped - query not document-related")
+
+        # 6) Generate response using LM with full context
+        # ALWAYS use the LM to generate natural, contextual responses
+        response_text = None
+        # Server-side relative date resolution to avoid LM arithmetic errors
+        def _parse_relative_days(text: str):
+            t = (text or "").lower()
+            t = t.replace("á", "a")
+            if "hoy" in t:
+                return 0
+            if "pasado mañana" in t or "pasado mañana" in t:
+                return 2
+            if "mañana" in t or "manana" in t:
+                return 1
+            m = re.search(r"dentro de\s+(\d+)\s*d[ií]as", t)
+            if not m:
+                m = re.search(r"en\s+(\d+)\s*d[ií]as", t)
+            if m:
+                try:
+                    return int(m.group(1))
+                except Exception:
+                    return None
+            return None
+
+        computed_date_text = None
+        rel_days = _parse_relative_days(message.message)
+        if rel_days is not None:
+            now_local = datetime.now()
+            target = now_local + timedelta(days=rel_days)
+            month_map = {
+                1: "enero", 2: "febrero", 3: "marzo", 4: "abril", 5: "mayo", 6: "junio",
+                7: "julio", 8: "agosto", 9: "septiembre", 10: "octubre", 11: "noviembre", 12: "diciembre"
+            }
+            computed_date_text = f"Fecha calculada (servidor): {target.day} de {month_map.get(target.month)} de {target.year}"
+        
+        try:
+            from app.llm.local_client import generate_response_with_context
+            
+            # Get current date for temporal context (force Spanish month names)
+            now = datetime.now()
+            month_map = {
+                1: "enero", 2: "febrero", 3: "marzo", 4: "abril", 5: "mayo", 6: "junio",
+                7: "julio", 8: "agosto", 9: "septiembre", 10: "octubre", 11: "noviembre", 12: "diciembre"
+            }
+            current_date = f"{now.day} de {month_map.get(now.month, now.strftime('%B'))} de {now.year}"
+            
+            # Combine any tool response with computed date context (if present)
+            tool_results_combined = None
+            if tool_response and computed_date_text:
+                tool_results_combined = f"{tool_response}\n\n{computed_date_text}"
+            elif computed_date_text:
+                tool_results_combined = computed_date_text
             else:
-                response_text = "He procesado tu solicitud. Por favor, proporciona más detalles o sube documentos para poder ayudarte mejor."
-        else:
-            # If RAG generated a response but we also have tool_response, prefer tool_response
+                tool_results_combined = tool_response
+
+            # Generate response with full context
+            response_text = generate_response_with_context(
+                user_message=message.message,
+                tool_results=tool_results_combined,
+                rag_context=rag_context_text,
+                current_date=current_date,
+                user_info=user_info,
+                max_tokens=200,
+                temperature=0.3  # Slightly creative but still factual
+            )
+            
+            logger.info(f"✅ LM generated response: {response_text[:100]}...")
+            
+            # Store LLM response in execution context for PDF generation
+            execution_context["llm_response"] = response_text
+            
+        except Exception as e:
+            logger.warning(f"LM generation failed: {e}")
+            # Fallback logic if LM fails
             if tool_response:
                 response_text = tool_response
-                sources = []  # Clear sources when using tools
-        # Ensure sources is a list of simple filenames (strings) or empty list
-        if sources and isinstance(sources, list):
-            # If sources contains dicts (old shape), extract filenames
-            normalized = []
-            for s in sources:
-                if isinstance(s, str):
-                    normalized.append(s)
-                elif isinstance(s, dict):
-                    md = s.get("metadata") or {}
-                    fn = md.get("source") or md.get("file_id") or None
-                    if fn:
-                        normalized.append(fn)
-            sources = list(dict.fromkeys(normalized))
-        else:
+            elif rag_context_text:
+                response_text = f"Encontré información en los documentos:\n\n{rag_context_text[:1000]}"
+            else:
+                response_text = "He procesado tu solicitud. Por favor, proporciona más detalles si necesitas ayuda adicional."
+        
+        # Legacy RAG processing (only used if LM generation failed and we need sources)
+        # Sources are now a list of dicts with {filename, snippet, chunk_index, distance}
+        # No need to normalize - keep as is for frontend display
+        if not sources:
             sources = []
 
         # Check if a file was generated during execution
         generated_file = None
-        for result in exec_results.get("results", []):
+        logger.info(f"🔍 Checking execution results for generated files...")
+        logger.info(f"   Total results: {len(exec_results.get('results', []))}")
+        
+        for idx, result in enumerate(exec_results.get("results", [])):
             result_data = result.get("result", {})
-            if isinstance(result_data, dict) and result_data.get("status") == "success" and "filename" in result_data:
+            tool_used = result.get("tool", "unknown")
+            logger.info(f"   Result {idx}: tool={tool_used}, type={type(result_data)}, keys={list(result_data.keys()) if isinstance(result_data, dict) else 'N/A'}")
+            
+            # document_generator returns {"success": True, "filename": ...}
+            if isinstance(result_data, dict) and result_data.get("success") and "filename" in result_data:
                 # File was generated, prepare download URL
                 filename = result_data["filename"]
+                file_format = result_data.get("format", "pdf").upper()
                 generated_file = {
                     "filename": filename,
                     "download_url": f"/api/generate/download/{filename}",
-                    "message": result_data.get("message", f"Archivo generado: {filename}")
+                    "message": f"Archivo {file_format} generado correctamente"
                 }
                 # Add info to response
-                response_text += f"\n\n✅ {generated_file['message']}\n📥 Descarga disponible"
+                response_text += f"\n\n✅ Archivo {file_format} generado: {filename}\n📥 La descarga comenzará automáticamente"
+                logger.info(f"✅ Generated file detected: {filename}")
                 break
+        
+        if not generated_file:
+            logger.warning("⚠️ No generated file found in execution results")
 
         res = ChatResponse(
             response=response_text,

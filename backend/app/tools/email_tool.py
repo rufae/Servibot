@@ -15,6 +15,7 @@ from googleapiclient.errors import HttpError
 
 from app.tools.base_tool import BaseTool, ToolSchema, ToolParameter
 from app.services.google_oauth import get_credentials_for_user
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -103,9 +104,15 @@ class EmailTool(BaseTool):
             # Get user credentials
             credentials = get_credentials_for_user(user_id)
             if not credentials:
+                # Provide frontend enough info to start OAuth flow
+                auth_start = f"/auth/google/start?user_id={user_id}"
+                auth_status = f"/auth/google/status?user_id={user_id}"
                 return {
                     "success": False,
-                    "error": "User not authenticated with Gmail. Please connect your Google account."
+                    "error": "User not authenticated with Gmail. Please connect your Google account.",
+                    "auth_required": True,
+                    "auth_url": auth_start,
+                    "auth_status_url": auth_status
                 }
             
             # Build Gmail service
@@ -138,17 +145,61 @@ class EmailTool(BaseTool):
     async def _send_email(self, service, params: Dict[str, Any]) -> Dict[str, Any]:
         """Send an email."""
         try:
-            message = MIMEMultipart()
-            message['to'] = params.get('to')
-            message['subject'] = params.get('subject', 'No Subject')
-            
+            # Build a multipart/alternative message with plain text and HTML
+            message = MIMEMultipart('alternative')
+            message['To'] = params.get('to')
+            message['Subject'] = params.get('subject', 'No Subject')
+
             if params.get('cc'):
-                message['cc'] = params['cc']
+                message['Cc'] = params['cc']
             if params.get('bcc'):
-                message['bcc'] = params['bcc']
-            
+                message['Bcc'] = params['bcc']
+
             body = params.get('body', '')
-            message.attach(MIMEText(body, 'plain'))
+
+            # Plain text fallback (no greeting or explicit sender signature)
+            plain_text = f"""{body}
+
+Support: {settings.FRONTEND_URL}
+"""
+
+            # Modern, structured HTML template (no explicit "sent by" signature)
+            safe_html_body = (body or '').replace('\n', '<br/>')
+            subject_text = params.get('subject', '')
+            accent_color = '#3B82F6'  # primary blue accent
+            html = f"""
+<html>
+    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; color: #0f172a; background:#f3f4f6; margin:0; padding:24px;">
+        <div style="max-width:700px;margin:0 auto;">
+            <!-- Card -->
+            <div style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 8px 30px rgba(2,6,23,0.12);">
+                <!-- Header bar -->
+                <div style="display:flex;align-items:center;gap:12px;padding:16px 20px;background:linear-gradient(90deg,{accent_color}33,{accent_color}22);">
+                    <img src="{settings.FRONTEND_URL.rstrip('/')}/Servibot.png" alt="" style="height:36px;object-fit:contain;border-radius:6px;background:transparent;" />
+                    <div>
+                        <div style="font-size:13px;color:#111;font-weight:700">{subject_text or settings.APP_NAME}</div>
+                        <div style="font-size:12px;color:#6b7280;margin-top:2px">{settings.APP_NAME}</div>
+                    </div>
+                </div>
+
+                <!-- Body -->
+                <div style="padding:20px 24px;color:#111;font-size:14px;line-height:1.6;">
+                    {safe_html_body}
+                </div>
+
+                <!-- Footer with subtle help link -->
+                <div style="padding:14px 20px;border-top:1px solid #eef2f7;background:#fbfdff;font-size:13px;color:#6b7280;display:flex;justify-content:space-between;align-items:center;">
+                    <div style="font-size:12px;color:#94a3b8">{__import__('datetime').datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</div>
+                </div>
+            </div>
+        </div>
+    </body>
+</html>
+"""
+
+            # Attach both parts (plain and html)
+            message.attach(MIMEText(plain_text, 'plain'))
+            message.attach(MIMEText(html, 'html'))
             
             # Encode message
             raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
@@ -177,10 +228,11 @@ class EmailTool(BaseTool):
             }
     
     async def _list_emails(self, service, params: Dict[str, Any]) -> Dict[str, Any]:
-        """List recent emails."""
+        """List recent emails from inbox, excluding spam and trash."""
         try:
             max_results = params.get('max_results', 10)
             query = params.get('query', None)
+            page_token = params.get('page_token', None)
             
             # Build request parameters
             list_params = {
@@ -188,13 +240,22 @@ class EmailTool(BaseTool):
                 'maxResults': max_results
             }
             
-            # Add query filter if provided
-            if query:
-                list_params['q'] = query
+            # Add page token for pagination
+            if page_token:
+                list_params['pageToken'] = page_token
+            
+            # Default filter: primary inbox only (excludes promotions, social, updates, forums)
+            # Also exclude spam and trash for safety
+            if not query:
+                query = 'category:primary -in:spam -in:trash'
+            
+            # Add query filter
+            list_params['q'] = query
             
             results = service.users().messages().list(**list_params).execute()
             
             messages = results.get('messages', [])
+            next_page_token = results.get('nextPageToken')
             
             # Get message details
             detailed_messages = []
@@ -218,11 +279,12 @@ class EmailTool(BaseTool):
                 })
             
             logger.info(f"✅ Listed {len(detailed_messages)} emails")
-            
+
             return {
                 "success": True,
                 "messages": detailed_messages,
-                "count": len(detailed_messages)
+                "count": len(detailed_messages),
+                "next_page_token": next_page_token
             }
             
         except HttpError as e:

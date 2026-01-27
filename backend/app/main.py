@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
 
-from app.api import chat, upload, health, rag, voice, generate, auth_google, tools, auth, auth
+from app.api import chat, upload, health, rag, voice, generate, auth_google, tools, auth, google_contacts
 from app.core.config import settings
 
 # Configure logging
@@ -105,6 +105,7 @@ app.include_router(voice.router, prefix="/api", tags=["Voice"])
 app.include_router(generate.router, prefix="/api", tags=["Generate"])
 app.include_router(auth.router, tags=["Authentication"])  # /auth/me, /auth/logout
 app.include_router(auth_google.router, tags=["Google OAuth"])  # /auth/google/*
+app.include_router(google_contacts.router, prefix="/api/google", tags=["Google Contacts"])  # /api/google/contacts
 app.include_router(tools.router, prefix="/api", tags=["Tools"])
 
 

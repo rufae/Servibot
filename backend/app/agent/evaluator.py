@@ -80,13 +80,14 @@ class Evaluator:
         
         results = execution_results.get("results", [])
         for result in results:
-            if result["status"] == "failed":
+            status = result.get("status", "unknown")
+            if status == "failed":
                 recommendations.append(
-                    f"Step {result['step']} failed: Consider retrying with different parameters"
+                    f"Step {result.get('step', '?')} failed: Consider retrying with different parameters"
                 )
-            elif result["status"] == "pending":
+            elif status == "pending":
                 recommendations.append(
-                    f"Step {result['step']} pending: User confirmation required"
+                    f"Step {result.get('step', '?')} pending: User confirmation required"
                 )
         
         if not recommendations:
