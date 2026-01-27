@@ -8,5 +8,25 @@
       "indexed": 2,
       "collection": "servibot_docs"
     }
+  },
+  "CV.pdf": {
+    "status": "indexed",
+    "message": "✓ Indexed 3 chunks",
+    "attempts": 0,
+    "debug": {
+      "status": "success",
+      "indexed": 3,
+      "collection": "servibot_docs"
+    }
+  },
+  "daniel.txt": {
+    "status": "indexed",
+    "message": "✓ Indexed 2 chunks",
+    "attempts": 0,
+    "debug": {
+      "status": "success",
+      "indexed": 2,
+      "collection": "servibot_docs"
+    }
   }
 }

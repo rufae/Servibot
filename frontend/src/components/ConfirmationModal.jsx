@@ -6,9 +6,9 @@ export default function ConfirmationModal({ pendingAction, onConfirm, onEdit, on
 
   const { action_type, action_params, confirmation_message } = pendingAction
   
-  // Edit mode state
+  // Edit mode state - initialize once and don't reset
   const [isEditMode, setIsEditMode] = useState(false)
-  const [editedParams, setEditedParams] = useState({ ...action_params })
+  const [editedParams, setEditedParams] = useState(action_params || {})
 
   // Prevent background scroll when modal is open
   useEffect(() => {
@@ -19,58 +19,77 @@ export default function ConfirmationModal({ pendingAction, onConfirm, onEdit, on
   }, [])
 
   const renderActionDetails = () => {
+    console.log('📋 renderActionDetails called:', { action_type, isEditMode })
+    
     if (action_type === 'send_email') {
+      console.log('📧 Email type detected, isEditMode:', isEditMode)
+      
       if (isEditMode) {
-        // Editable mode
+        console.log('✏️ Rendering EDIT mode for email with params:', editedParams)
+        // Editable mode - use editedParams state
         return (
-          <div className="bg-gradient-to-br from-blue-500/10 to-purple-500/10 rounded-lg p-4 border border-blue-500/30">
+          <div className="bg-gradient-to-br from-orange-500/10 to-yellow-500/10 rounded-lg p-4 border-2 border-orange-500/50">
+            <p className="text-orange-300 text-xs mb-3 font-bold">⚡ MODO EDICIÓN ACTIVO</p>
             <div className="space-y-4">
               <div className="flex flex-col gap-2">
                 <label className="text-sm font-semibold text-blue-300">Para:</label>
                 <input
                   type="email"
-                  value={editedParams.to || ''}
-                  onChange={(e) => setEditedParams({ ...editedParams, to: e.target.value })}
-                  className="bg-gray-800/50 text-white text-sm rounded-lg px-3 py-2 border border-blue-500/30 focus:border-blue-500 focus:outline-none"
+                  value={editedParams.to || action_params.to || ''}
+                  onChange={(e) => {
+                    console.log('📝 Email field changed:', e.target.value)
+                    setEditedParams({ ...editedParams, to: e.target.value })
+                  }}
+                  className="bg-gray-800/90 text-white text-sm rounded-lg px-3 py-2 border-2 border-blue-500/50 focus:border-blue-500 focus:outline-none"
+                  placeholder="Destinatario"
                 />
               </div>
               <div className="flex flex-col gap-2">
                 <label className="text-sm font-semibold text-blue-300">Asunto:</label>
                 <input
                   type="text"
-                  value={editedParams.subject || ''}
-                  onChange={(e) => setEditedParams({ ...editedParams, subject: e.target.value })}
-                  className="bg-gray-800/50 text-white text-sm rounded-lg px-3 py-2 border border-blue-500/30 focus:border-blue-500 focus:outline-none"
+                  value={editedParams.subject || action_params.subject || ''}
+                  onChange={(e) => {
+                    console.log('📝 Subject field changed:', e.target.value)
+                    setEditedParams({ ...editedParams, subject: e.target.value })
+                  }}
+                  className="bg-gray-800/90 text-white text-sm rounded-lg px-3 py-2 border-2 border-blue-500/50 focus:border-blue-500 focus:outline-none"
+                  placeholder="Asunto del correo"
                 />
               </div>
               <div className="flex flex-col gap-2">
                 <label className="text-sm font-semibold text-blue-300">Mensaje:</label>
                 <textarea
-                  value={editedParams.body || ''}
-                  onChange={(e) => setEditedParams({ ...editedParams, body: e.target.value })}
-                  rows={6}
-                  className="bg-gray-800/50 text-white text-sm rounded-lg px-3 py-2 border border-blue-500/30 focus:border-blue-500 focus:outline-none resize-y"
+                  value={editedParams.body || action_params.body || ''}
+                  onChange={(e) => {
+                    console.log('📝 Body field changed, length:', e.target.value.length)
+                    setEditedParams({ ...editedParams, body: e.target.value })
+                  }}
+                  rows={8}
+                  className="bg-gray-800/90 text-white text-sm rounded-lg px-3 py-2 border-2 border-blue-500/50 focus:border-blue-500 focus:outline-none resize-y"
+                  placeholder="Escribe el mensaje aquí..."
                 />
               </div>
             </div>
           </div>
         )
       } else {
-        // View mode
+        console.log('👁️ Rendering VIEW mode for email')
+        // View mode - use action_params directly from props
         return (
           <div className="bg-gradient-to-br from-blue-500/10 to-purple-500/10 rounded-lg p-4 border border-blue-500/30">
             <div className="space-y-2">
               <div className="flex items-start gap-2">
                 <span className="text-sm font-semibold text-blue-300 min-w-[60px]">Para:</span>
-                <span className="text-sm text-white">{editedParams.to}</span>
+                <span className="text-sm text-white">{action_params.to}</span>
               </div>
               <div className="flex items-start gap-2">
                 <span className="text-sm font-semibold text-blue-300 min-w-[60px]">Asunto:</span>
-                <span className="text-sm text-white">{editedParams.subject}</span>
+                <span className="text-sm text-white">{action_params.subject}</span>
               </div>
               <div className="flex items-start gap-2">
                 <span className="text-sm font-semibold text-blue-300 min-w-[60px]">Mensaje:</span>
-                <span className="text-sm text-white whitespace-pre-wrap">{editedParams.body}</span>
+                <span className="text-sm text-white whitespace-pre-wrap">{action_params.body}</span>
               </div>
             </div>
           </div>
@@ -149,15 +168,23 @@ export default function ConfirmationModal({ pendingAction, onConfirm, onEdit, on
   const getTitle = () => {
     if (action_type === 'send_email') return 'Confirmar envío de email'
     if (action_type === 'create_calendar_event') return 'Confirmar creación de evento'
+    if (action_type === 'delete_calendar_event') return 'Confirmar eliminación de evento'
+    if (action_type === 'update_calendar_event') return 'Confirmar actualización de evento'
     return 'Confirmar acción'
   }
 
+  // Check if the "Edit" button should be shown (only for email send and event creation)
+  const canEdit = action_type === 'send_email' || action_type === 'create_calendar_event'
+  
+  // Debug logging
+  console.log('🔍 ConfirmationModal render:', { action_type, canEdit, isEditMode, editedParams })
+
   return (
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/70 backdrop-blur-md animate-fadeIn"
+      className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 lg:p-6 bg-black/70 backdrop-blur-md animate-fadeIn"
     >
       <div 
-        className="bg-dark-900/95 backdrop-blur-xl rounded-2xl sm:rounded-3xl shadow-2xl border border-dark-800 w-full max-w-sm sm:max-w-md max-h-[56vh] sm:max-h-[48vh] overflow-hidden flex flex-col animate-scaleIn"
+        className="bg-dark-900/95 backdrop-blur-xl rounded-2xl sm:rounded-3xl shadow-2xl border border-dark-800 w-full max-w-md sm:max-w-2xl lg:max-w-4xl max-h-[80vh] sm:max-h-[85vh] overflow-hidden flex flex-col animate-scaleIn"
       >
         {/* Header */}
         <div className="bg-gradient-to-r from-primary-600/20 to-secondary-600/20 backdrop-blur-sm px-3 sm:px-4 py-2 sm:py-3 border-b border-dark-800 flex items-center justify-between flex-shrink-0">
@@ -178,7 +205,7 @@ export default function ConfirmationModal({ pendingAction, onConfirm, onEdit, on
         </div>
 
         {/* Content - Scrollable */}
-        <div className="px-3 sm:px-5 py-2 sm:py-3 space-y-2 sm:space-y-3 overflow-y-auto flex-1 max-h-[40vh] sm:max-h-[32vh]">
+        <div className="px-3 sm:px-5 lg:px-6 py-3 sm:py-4 lg:py-5 space-y-3 sm:space-y-4 lg:space-y-5 overflow-y-auto flex-1 max-h-[65vh] sm:max-h-[70vh]">
           {/* Confirmation Message */}
           {confirmation_message && (
             <div className="bg-warning-500/10 border border-warning-500/30 rounded-lg sm:rounded-xl p-3 sm:p-4 backdrop-blur-sm">
@@ -192,13 +219,8 @@ export default function ConfirmationModal({ pendingAction, onConfirm, onEdit, on
             </div>
           )}
 
-          {/* Action Details Card */}
-          <div>
-            <h3 className="text-xs sm:text-sm font-semibold text-dark-400 mb-2 sm:mb-3 uppercase tracking-wide">
-              Detalles de la acción
-            </h3>
-            {renderActionDetails()}
-          </div>
+          {/* Action Details */}
+          {renderActionDetails()}
 
           {/* Warning */}
           <div className="bg-warning-500/10 border border-warning-500/30 rounded-lg sm:rounded-xl p-3 sm:p-4 flex items-start gap-2 sm:gap-3">
@@ -225,13 +247,20 @@ export default function ConfirmationModal({ pendingAction, onConfirm, onEdit, on
 
           {!isEditMode ? (
             <>
-              <button
-                onClick={() => setIsEditMode(true)}
-                className="px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg sm:rounded-xl bg-primary-600/20 hover:bg-primary-600/30 text-primary-300 hover:text-primary-100 transition-all border border-primary-500/30 flex items-center gap-1.5 sm:gap-2 font-medium text-xs sm:text-sm hover:scale-105 active:scale-95"
-              >
-                <Edit2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                Editar
-              </button>
+              {canEdit && (
+                <button
+                  onClick={() => {
+                    console.log('✏️ Edit button clicked, switching to edit mode')
+                    // Sync editedParams with current action_params before entering edit mode
+                    setEditedParams({ ...action_params })
+                    setIsEditMode(true)
+                  }}
+                  className="px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg sm:rounded-xl bg-primary-600/20 hover:bg-primary-600/30 text-primary-300 hover:text-primary-100 transition-all border border-primary-500/30 flex items-center gap-1.5 sm:gap-2 font-medium text-xs sm:text-sm hover:scale-105 active:scale-95"
+                >
+                  <Edit2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                  Editar
+                </button>
+              )}
 
               <button
                 onClick={() => {

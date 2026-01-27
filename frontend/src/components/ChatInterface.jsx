@@ -1,28 +1,73 @@
-import { useState, useRef, useEffect } from 'react'
-import { Send, Loader2, Volume2, FileDown } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Send, FileDown, Mic, MicOff, Sparkles, Trash2 } from 'lucide-react'
 import VoiceRecorder from './VoiceRecorder'
-import AudioPlayer from './AudioPlayer'
 import FileGenerator from './FileGenerator'
-import MarkdownRenderer from './MarkdownRenderer'
-import { chatService, voiceService } from '../services'
+import ChatHistory from './ChatHistory'
+import { chatService } from '../services'
 import { API_BASE_URL } from '../services/api'
+import ConfirmationModal from './ConfirmationModal'
+import { api } from '../services/api'
+import Swal from 'sweetalert2'
 
 export default function ChatInterface({ messages, setMessages, setAgentActivity }) {
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [expandedSources, setExpandedSources] = useState({})
   const [showVoiceRecorder, setShowVoiceRecorder] = useState(false)
   const [showFileGenerator, setShowFileGenerator] = useState(false)
-  const [audioUrlForMessage, setAudioUrlForMessage] = useState({}) // Map message index to audio URL
-  const messagesEndRef = useRef(null)
+  const [pendingAction, setPendingAction] = useState(null)
 
   // Ensure messages is always an array
   const safeMessages = Array.isArray(messages) ? messages : []
-
-  // Auto-scroll to bottom when messages change
+  
+  // Load messages from localStorage on mount
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [safeMessages, isLoading])
+    const savedMessages = localStorage.getItem('servibot_conversation')
+    if (savedMessages) {
+      try {
+        const parsed = JSON.parse(savedMessages)
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setMessages(parsed)
+        }
+      } catch (e) {
+        console.warn('Failed to load saved conversation:', e)
+      }
+    }
+  }, [])
+  
+  // Save messages to localStorage whenever they change
+  useEffect(() => {
+    if (safeMessages.length > 0) {
+      localStorage.setItem('servibot_conversation', JSON.stringify(safeMessages))
+    }
+  }, [safeMessages])
+  
+  const handleClearConversation = async () => {
+    const result = await Swal.fire({
+      title: '¿Eliminar conversación?',
+      text: 'Se borrará todo el historial de mensajes',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#ef4444',
+      cancelButtonColor: '#6b7280',
+      confirmButtonText: 'Sí, eliminar',
+      cancelButtonText: 'Cancelar',
+      background: 'var(--bg-panel)',
+      color: 'var(--text-primary)'
+    })
+    
+    if (result.isConfirmed) {
+      setMessages([])
+      localStorage.removeItem('servibot_conversation')
+      Swal.fire({
+        icon: 'success',
+        title: 'Conversación eliminada',
+        timer: 1500,
+        showConfirmButton: false,
+        background: 'var(--bg-panel)',
+        color: 'var(--text-primary)'
+      })
+    }
+  }
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return
@@ -38,7 +83,13 @@ export default function ChatInterface({ messages, setMessages, setAgentActivity 
     setIsLoading(true)
 
     try {
-      const result = await chatService.sendMessage(input)
+      // Prepare conversation history (last 10 messages for context)
+      const historyForContext = safeMessages.slice(-10).map(msg => ({
+        role: msg.role,
+        content: msg.content
+      }))
+      
+      const result = await chatService.sendMessage(input, {}, historyForContext)
 
       if (!result.success) {
         throw new Error(result.error)
@@ -55,9 +106,42 @@ export default function ChatInterface({ messages, setMessages, setAgentActivity 
 
       setMessages(prev => [...prev, assistantMessage])
 
+      // If backend indicates a pending confirmation, show modal
+      if (response.pending_confirmation) {
+        console.log('📬 Pending confirmation received, opening modal')
+        setPendingAction(response.pending_confirmation)
+      }
+
       // Update agent activity timeline
       if (response.plan && Array.isArray(response.plan)) {
         setAgentActivity(response.plan)
+      }
+
+      // Emit calendar update event if calendar was modified
+      // Check if execution results include calendar operations
+      let calendarModified = false
+      if (response.execution?.results) {
+        calendarModified = response.execution.results.some(result => 
+          result.tool_used === 'calendar' && 
+          result.status === 'success' &&
+          result.result?.success
+        )
+      }
+      
+      // Fallback to text matching if no execution data
+      if (!calendarModified) {
+        const contentLower = response.response?.toLowerCase() || ''
+        const calendarKeywords = [
+          'evento creado', 'evento actualizado', 'evento eliminado',
+          'evento modificado', 'evento borrado', 'calendario actualizado',
+          'event created', 'event updated', 'event deleted'
+        ]
+        calendarModified = calendarKeywords.some(kw => contentLower.includes(kw))
+      }
+      
+      if (calendarModified) {
+        console.log('📅 Calendar modification detected, emitting update event...')
+        window.dispatchEvent(new CustomEvent('calendarUpdated'))
       }
 
       // Auto-download generated file if available
@@ -103,186 +187,125 @@ export default function ChatInterface({ messages, setMessages, setAgentActivity 
     setShowVoiceRecorder(false)
   }
 
-  const handleGenerateTTS = async (messageIndex, messageContent) => {
-    try {
-      const result = await voiceService.synthesize(messageContent, 'es', 'gtts')
-
-      if (result.success && result.data.status === 'success') {
-        setAudioUrlForMessage(prev => ({
-          ...prev,
-          [messageIndex]: result.data.audio_url
-        }))
-      }
-    } catch (error) {
-      console.error('Error generating TTS:', error)
-    }
-  }
-
   return (
-    <div className="bg-gradient-to-br from-gray-800 via-gray-900 to-gray-800 rounded-2xl shadow-2xl border border-gray-700 flex flex-col h-[500px] sm:h-[600px] overflow-hidden">
+    <div className="glass-effect rounded-3xl shadow-2xl border border-white/10 flex flex-col h-[500px] sm:h-[650px] overflow-hidden backdrop-blur-xl bg-slate-800/40">
       {/* Chat Header */}
-      <div className="px-6 py-5 border-b border-gray-700 bg-gradient-to-r from-primary-600/20 to-purple-600/20">
+      <div className="px-5 sm:px-6 py-4 sm:py-5 border-b border-white/10 bg-gradient-to-r from-primary-500/20 via-secondary-500/20 to-accent-500/20 backdrop-blur-sm">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-purple-500 flex items-center justify-center">
-              <span className="text-xl">💬</span>
+            <div className="relative group">
+              <div className="absolute inset-0 bg-gradient-to-br from-primary-500 to-secondary-500 rounded-xl blur-md opacity-50 group-hover:opacity-75 transition-opacity"></div>
+              <div className="relative w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-secondary-500 flex items-center justify-center shadow-glow">
+                <Sparkles className="w-5 h-5 text-white" />
+              </div>
             </div>
             <div>
-              <h2 className="text-xl font-bold text-white">Chat con ServiBot</h2>
-              <p className="text-xs text-gray-400">Hazme preguntas sobre tus documentos</p>
+              <h2 className="text-lg sm:text-xl font-bold text-white">Chat con ServiBot</h2>
+              <p className="text-xs text-dark-400">Hazme preguntas sobre tus documentos</p>
             </div>
           </div>
           
-          {/* Header Actions */}
+          {/* Header Actions - grouped so buttons stay together */}
           <div className="flex items-center gap-2">
             <button
+              onClick={handleClearConversation}
+              className="p-2 sm:p-2.5 rounded-xl bg-dark-900/50 hover:bg-red-500/20 text-dark-300 hover:text-red-400 transition-all border border-dark-800 hover:border-red-500/30 hover-lift"
+              title="Eliminar conversación"
+            >
+              <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
+            </button>
+            <button
               onClick={() => setShowFileGenerator(!showFileGenerator)}
-              className="p-2 rounded-lg bg-gray-700/50 hover:bg-gray-600/50 text-gray-300 hover:text-white transition-all border border-gray-600/50"
+              className="p-2 sm:p-2.5 rounded-xl bg-dark-900/50 hover:bg-dark-900/80 text-dark-300 hover:text-white transition-all border border-dark-800 hover:border-dark-700 hover-lift"
               title="Exportar conversación"
             >
-              <FileDown className="w-5 h-5" />
+              <FileDown className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
           </div>
         </div>
         
         {/* File Generator Panel */}
         {showFileGenerator && (
-          <div className="mt-4 p-4 bg-gray-800/50 rounded-lg border border-gray-700">
+          <div className="mt-4 p-4 bg-dark-900/50 rounded-xl border border-dark-800 backdrop-blur-sm animate-scaleIn">
             <FileGenerator messages={safeMessages} />
           </div>
         )}
       </div>
 
-      {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-4 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent" role="log" aria-live="polite" aria-label="Historial de conversación">
-        {safeMessages.length === 0 ? (
-          <div className="text-center text-gray-400 mt-20 animate-fadeIn">
-            <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-primary-500/20 to-purple-500/20 flex items-center justify-center border border-primary-500/30">
-              <span className="text-4xl">👋</span>
-            </div>
-            <p className="text-lg mb-2 font-semibold text-white">¡Hola! Soy ServiBot</p>
-            <p className="text-sm text-gray-500">Envíame un mensaje para comenzar</p>
-          </div>
-        ) : (
-          safeMessages.map((msg, idx) => (
-            <div
-              key={idx}
-              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-slideIn`}
-            >
-              <div
-                className={`max-w-[80%] rounded-2xl px-5 py-3 shadow-lg ${
-                  msg.role === 'user'
-                    ? 'bg-gradient-to-br from-primary-600 to-primary-700 text-white'
-                    : msg.error
-                    ? 'bg-red-500/20 text-red-300 border border-red-500/50'
-                    : 'bg-gradient-to-br from-gray-800 to-gray-900 text-gray-100 border border-gray-700'
-                }`}
-              >
-                {msg.role === 'user' ? (
-                  <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
-                ) : (
-                  <MarkdownRenderer content={msg.content} />
-                )}
-                
-                {/* TTS Button for assistant messages */}
-                {msg.role === 'assistant' && !msg.error && (
-                  <div className="mt-3 flex items-center gap-2">
-                    {!audioUrlForMessage[idx] ? (
-                      <button
-                        onClick={() => handleGenerateTTS(idx, msg.content)}
-                        className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-400/30 hover:bg-purple-500/30 hover:border-purple-400/50 transition-all"
-                      >
-                        <Volume2 className="w-3.5 h-3.5" />
-                        Escuchar respuesta
-                      </button>
-                    ) : (
-                      <div className="w-full">
-                        <AudioPlayer audioUrl={audioUrlForMessage[idx]} />
-                      </div>
-                    )}
-                  </div>
-                )}
-                
-                {/* Render RAG sources if present */}
-                {msg.sources && msg.sources.length > 0 && (
-                  <div className="mt-4 bg-black/20 p-3 rounded-xl border border-white/10">
-                    <h4 className="text-xs font-semibold text-gray-300 mb-2 flex items-center gap-2">
-                      <span className="w-1 h-1 rounded-full bg-primary-400"></span>
-                      Fuentes consultadas
-                    </h4>
-                    <div className="flex flex-wrap gap-2 items-center">
-                      {(() => {
-                        const key = idx
-                        const expanded = !!expandedSources[key]
-                        const limit = 6
-                        const sources = msg.sources.map(s => (typeof s === 'string' ? s : (s.filename || s.metadata?.source || 'Fuente desconocida')))
-                        const visible = expanded ? sources : sources.slice(0, limit)
-                        return (
-                          <>
-                            {visible.map((name, i) => (
-                              <a
-                                key={i}
-                                href={`${API_BASE_URL}/api/upload/file/${encodeURIComponent(name)}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-xs bg-primary-500/30 text-primary-200 px-3 py-1.5 rounded-lg border border-primary-400/30 hover:bg-primary-500/40 hover:border-primary-400/50 transition-all flex items-center gap-1.5 group"
-                                title={`Abrir ${name}`}
-                              >
-                                <span className="w-1.5 h-1.5 rounded-full bg-primary-400 group-hover:scale-125 transition-transform"></span>
-                                {name}
-                              </a>
-                            ))}
+      {/* Messages Area - Using ChatHistory component */}
+      <ChatHistory messages={safeMessages} isLoading={isLoading} />
 
-                            {sources.length > limit && (
-                              <button
-                                onClick={() => setExpandedSources(prev => ({ ...prev, [key]: !prev[key] }))}
-                                className="text-xs text-primary-300 px-3 py-1.5 rounded-lg hover:bg-primary-500/20 transition-all border border-primary-400/20 hover:border-primary-400/40"
-                              >
-                                {expanded ? '← Ver menos' : `+${sources.length - limit} más →`}
-                              </button>
-                            )}
-                          </>
-                        )
-                      })()}
-                    </div>
-                  </div>
-                )}
-                
-                <p className="text-xs mt-3 opacity-60 flex items-center gap-1.5">
-                  <span className="w-1 h-1 rounded-full bg-current"></span>
-                  {new Date(msg.timestamp).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
-                </p>
-              </div>
-            </div>
-          ))
-        )}
-        {isLoading && (
-          <div className="flex justify-start animate-slideIn">
-            <div className="bg-gradient-to-br from-gray-800 to-gray-900 border border-gray-700 rounded-2xl px-5 py-4 flex items-center space-x-3 shadow-lg">
-              <div className="flex space-x-1">
-                <div className="w-2 h-2 bg-primary-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                <div className="w-2 h-2 bg-primary-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                <div className="w-2 h-2 bg-primary-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-              </div>
-              <span className="text-gray-300 text-sm">Pensando...</span>
-            </div>
-          </div>
-        )}
-        <div ref={messagesEndRef} />
-      </div>
+      {/* Confirmation Modal for pending actions */}
+      <ConfirmationModal
+        pendingAction={pendingAction}
+        onConfirm={async (updatedAction) => {
+          // If updatedAction provided (edit mode), use it; otherwise use pendingAction
+          const payload = {
+            message: '',
+            confirmation_action: 'confirm',
+            pending_action_data: updatedAction || pendingAction
+          }
+          try {
+            setIsLoading(true)
+            const resp = await api.post('/api/chat', payload)
+            // Append assistant response
+            const assistantMsg = {
+              role: 'assistant',
+              content: resp.response,
+              sources: resp.sources || null,
+              timestamp: resp.timestamp
+            }
+            setMessages(prev => [...prev, assistantMsg])
+            
+            // Check if we confirmed a calendar action and trigger refresh
+            const actionType = (updatedAction || pendingAction)?.action_type
+            if (actionType && actionType.includes('calendar')) {
+              console.log('📅 Calendar action confirmed, triggering refresh...')
+              setTimeout(() => {
+                window.dispatchEvent(new CustomEvent('calendarUpdated'))
+              }, 500)
+            }
+            
+            // Clear modal
+            setPendingAction(null)
+          } catch (err) {
+            console.error('Error confirming action:', err)
+          } finally {
+            setIsLoading(false)
+          }
+        }}
+        onEdit={() => {
+          // Edit is handled inside ConfirmationModal via edit mode; noop here
+        }}
+        onCancel={async () => {
+          // Notify backend about cancellation for consistency
+          try {
+            setIsLoading(true)
+            await api.post('/api/chat', { message: '', confirmation_action: 'cancel', pending_action_data: pendingAction })
+          } catch (err) {
+            console.error('Error cancelling action:', err)
+          } finally {
+            setPendingAction(null)
+            setIsLoading(false)
+          }
+        }}
+      />
 
       {/* Input Area */}
-      <div className="px-6 py-4 border-t border-gray-700 bg-gray-800/50">
+      <div className="px-4 sm:px-6 py-4 border-t border-dark-800/50 bg-dark-900/30 backdrop-blur-sm">
         {/* Voice Recorder Panel */}
         {showVoiceRecorder && (
-          <div className="mb-4 p-4 bg-gray-900/80 rounded-xl border border-purple-500/30">
+          <div className="mb-4 p-4 bg-dark-900/80 rounded-xl border border-secondary-500/30 backdrop-blur-sm animate-scaleIn">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-white">Grabación de Voz</h3>
+              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                <Mic className="w-4 h-4 text-secondary-400" />
+                Grabación de Voz
+              </h3>
               <button
                 onClick={() => setShowVoiceRecorder(false)}
-                className="text-xs text-gray-400 hover:text-white transition-colors"
+                className="p-1.5 text-dark-400 hover:text-white hover:bg-dark-800 rounded-lg transition-all"
               >
-                Cerrar ✕
+                <MicOff className="w-4 h-4" />
               </button>
             </div>
             <VoiceRecorder 
@@ -292,7 +315,7 @@ export default function ChatInterface({ messages, setMessages, setAgentActivity 
           </div>
         )}
 
-        <div className="flex space-x-3">
+        <div className="flex gap-2 sm:gap-3">
           <input
             type="text"
             value={input}
@@ -301,35 +324,31 @@ export default function ChatInterface({ messages, setMessages, setAgentActivity 
             placeholder="Escribe tu mensaje o usa el micrófono..."
             disabled={isLoading}
             aria-label="Escribe tu mensaje"
-            aria-describedby="chat-input-description"
-            className="flex-1 bg-gray-900 text-white rounded-xl px-5 py-3 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 border border-gray-700 focus:border-primary-500 transition-all placeholder-gray-500"
+            className="flex-1 glass-effect text-white rounded-xl px-4 sm:px-5 py-2.5 sm:py-3 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 border border-dark-800 focus:border-primary-500 transition-all placeholder-dark-500 text-sm sm:text-base backdrop-blur-sm"
           />
           
           {/* Voice Button */}
           <button
             onClick={() => setShowVoiceRecorder(!showVoiceRecorder)}
             disabled={isLoading}
-            className={`
-              rounded-xl px-4 py-3 transition-all
-              ${showVoiceRecorder 
-                ? 'bg-purple-600 hover:bg-purple-700 text-white' 
-                : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
-              }
-              disabled:opacity-50 disabled:cursor-not-allowed
-            `}
+            className={`rounded-xl px-3 sm:px-4 py-2.5 sm:py-3 transition-all hover-lift flex items-center justify-center ${
+              showVoiceRecorder 
+                ? 'bg-gradient-to-r from-secondary-500 to-accent-500 hover:from-secondary-600 hover:to-accent-600 text-white shadow-glow' 
+                : 'glass-effect hover:bg-dark-900/80 text-dark-300 hover:text-white border border-dark-800'
+            } disabled:opacity-50 disabled:cursor-not-allowed`}
             title="Grabar mensaje de voz"
           >
-            🎤
+            <Mic className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
 
           <button
             onClick={handleSend}
             disabled={isLoading || !input.trim()}
             aria-label="Enviar mensaje"
-            className="bg-gradient-to-r from-primary-600 to-primary-700 hover:from-primary-700 hover:to-primary-800 disabled:from-gray-600 disabled:to-gray-700 disabled:cursor-not-allowed text-white rounded-xl px-6 py-3 flex items-center space-x-2 transition-all shadow-lg hover:shadow-primary-500/30 disabled:shadow-none transform hover:scale-105 disabled:scale-100"
+            className="bg-gradient-to-r from-primary-500 via-secondary-500 to-accent-500 hover:from-primary-600 hover:via-secondary-600 hover:to-accent-600 disabled:from-slate-700 disabled:to-slate-800 disabled:cursor-not-allowed text-white rounded-xl px-4 sm:px-6 py-2.5 sm:py-3 flex items-center gap-2 transition-all shadow-glow-strong hover:shadow-[0_0_50px_rgba(59,130,246,0.8)] disabled:shadow-none transform hover:scale-110 active:scale-95 disabled:scale-100"
           >
-            <Send className="w-5 h-5" />
-            <span className="font-medium">Enviar</span>
+            <Send className="w-4 h-4 sm:w-5 sm:h-5" />
+            <span className="font-medium text-sm sm:text-base hidden sm:inline">Enviar</span>
           </button>
         </div>
       </div>

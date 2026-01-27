@@ -7,11 +7,12 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
  */
 export const authService = {
   /**
-   * Get Google OAuth status for a user
+   * Get Google OAuth status for authenticated user
+   * User ID is extracted from JWT token automatically
    */
-  getGoogleStatus: async (userId = 'default_user') => {
+  getGoogleStatus: async () => {
     try {
-      const response = await api.get(`/auth/google/status?user_id=${encodeURIComponent(userId)}`)
+      const response = await api.get('/auth/google/status')
       return {
         success: true,
         data: response,

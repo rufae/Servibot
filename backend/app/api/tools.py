@@ -9,6 +9,9 @@ from pydantic import BaseModel
 
 from app.tools.calendar_tool import get_calendar_tool
 from app.tools.email_tool import get_email_tool
+from fastapi import Header
+from app.auth.jwt_handler import verify_token
+from app.db.sqlite_client import get_sqlite_client
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +50,25 @@ class EmailRequest(BaseModel):
 @router.get("/calendar/events")
 async def list_calendar_events(
     user_id: str = Query(default="default_user"),
-    max_results: int = Query(default=10)
+    max_results: int = Query(default=10),
+    authorization: Optional[str] = Header(None)
 ):
     """List upcoming calendar events."""
     try:
+        # Prefer authenticated user from Authorization header
+        if authorization:
+            try:
+                token = authorization.replace('Bearer ', '') if 'Bearer ' in authorization else authorization
+                uid = verify_token(token)
+                if uid:
+                    db = get_sqlite_client()
+                    user = db.get_user_by_id(int(uid))
+                    if user:
+                        user_id = str(user.get('id'))
+                        logger.info(f"✅ Using user_id: {user_id} for tools endpoint")
+            except Exception:
+                logger.warning("Could not extract user from Authorization header for tools endpoint")
+
         calendar_tool = get_calendar_tool()
         result = await calendar_tool.execute({
             "action": "list",
@@ -69,10 +87,24 @@ async def list_calendar_events(
 @router.post("/calendar/events")
 async def create_calendar_event(
     request: CalendarEventRequest,
-    user_id: str = Query(default="default_user")
+    user_id: str = Query(default="default_user"),
+    authorization: Optional[str] = Header(None)
 ):
     """Create a new calendar event."""
     try:
+        if authorization:
+            try:
+                token = authorization.replace('Bearer ', '') if 'Bearer ' in authorization else authorization
+                uid = verify_token(token)
+                if uid:
+                    db = get_sqlite_client()
+                    user = db.get_user_by_id(int(uid))
+                    if user:
+                        user_id = str(user.get('id'))
+                        logger.info(f"✅ Using user_id: {user_id} for tools endpoint")
+            except Exception:
+                logger.warning("Could not extract user from Authorization header for tools endpoint")
+
         calendar_tool = get_calendar_tool()
         result = await calendar_tool.execute({
             "action": "create",
@@ -96,10 +128,24 @@ async def create_calendar_event(
 @router.post("/calendar")
 async def calendar_action(
     request: CalendarEventRequest,
-    user_id: str = Query(default="default_user")
+    user_id: str = Query(default="default_user"),
+    authorization: Optional[str] = Header(None)
 ):
     """Execute any calendar action (create, list, update, delete)."""
     try:
+        if authorization:
+            try:
+                token = authorization.replace('Bearer ', '') if 'Bearer ' in authorization else authorization
+                uid = verify_token(token)
+                if uid:
+                    db = get_sqlite_client()
+                    user = db.get_user_by_id(int(uid))
+                    if user:
+                        user_id = str(user.get('id'))
+                        logger.info(f"✅ Using user_id: {user_id} for tools endpoint")
+            except Exception:
+                logger.warning("Could not extract user from Authorization header for tools endpoint")
+
         calendar_tool = get_calendar_tool()
         result = await calendar_tool.execute(request.dict(exclude_none=True), user_id=user_id)
         
@@ -117,10 +163,25 @@ async def calendar_action(
 async def list_emails(
     user_id: str = Query(default="default_user"),
     max_results: int = Query(default=10),
-    query: Optional[str] = Query(None)
+    query: Optional[str] = Query(None),
+    page_token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None)
 ):
-    """List recent emails or search emails."""
+    """List recent emails or search emails with pagination support."""
     try:
+        if authorization:
+            try:
+                token = authorization.replace('Bearer ', '') if 'Bearer ' in authorization else authorization
+                uid = verify_token(token)
+                if uid:
+                    db = get_sqlite_client()
+                    user = db.get_user_by_id(int(uid))
+                    if user:
+                        user_id = str(user.get('id'))
+                        logger.info(f"✅ Using user_id: {user_id} for tools endpoint")
+            except Exception:
+                logger.warning("Could not extract user from Authorization header for tools endpoint")
+
         email_tool = get_email_tool()
         
         params = {
@@ -130,6 +191,8 @@ async def list_emails(
         
         if query:
             params["query"] = query
+        if page_token:
+            params["page_token"] = page_token
         
         result = await email_tool.execute(params, user_id=user_id)
         
@@ -145,10 +208,24 @@ async def list_emails(
 @router.post("/gmail/send")
 async def send_email(
     request: EmailRequest,
-    user_id: str = Query(default="default_user")
+    user_id: str = Query(default="default_user"),
+    authorization: Optional[str] = Header(None)
 ):
     """Send an email."""
     try:
+        if authorization:
+            try:
+                token = authorization.replace('Bearer ', '') if 'Bearer ' in authorization else authorization
+                uid = verify_token(token)
+                if uid:
+                    db = get_sqlite_client()
+                    user = db.get_user_by_id(int(uid))
+                    if user:
+                        user_id = str(user.get('id'))
+                        logger.info(f"✅ Using user_id: {user_id} for tools endpoint")
+            except Exception:
+                logger.warning("Could not extract user from Authorization header for tools endpoint")
+
         email_tool = get_email_tool()
         result = await email_tool.execute({
             "action": "send",
@@ -171,10 +248,24 @@ async def send_email(
 @router.post("/gmail")
 async def gmail_action(
     request: EmailRequest,
-    user_id: str = Query(default="default_user")
+    user_id: str = Query(default="default_user"),
+    authorization: Optional[str] = Header(None)
 ):
     """Execute any email action (send, list, read, search, delete)."""
     try:
+        if authorization:
+            try:
+                token = authorization.replace('Bearer ', '') if 'Bearer ' in authorization else authorization
+                uid = verify_token(token)
+                if uid:
+                    db = get_sqlite_client()
+                    user = db.get_user_by_id(int(uid))
+                    if user:
+                        user_id = str(user.get('id'))
+                        logger.info(f"✅ Using user_id: {user_id} for tools endpoint")
+            except Exception:
+                logger.warning("Could not extract user from Authorization header for tools endpoint")
+
         email_tool = get_email_tool()
         result = await email_tool.execute(request.dict(exclude_none=True), user_id=user_id)
         

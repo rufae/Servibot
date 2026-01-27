@@ -256,11 +256,11 @@ export default function VoiceRecorder({ onTranscriptionComplete, disabled = fals
         className={`
           relative p-3 rounded-full transition-all duration-300
           ${isRecording 
-            ? 'bg-red-500 hover:bg-red-600 shadow-lg shadow-red-500/50 animate-pulse' 
-            : 'bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 shadow-lg'
+            ? 'bg-gradient-to-r from-danger-500 to-danger-600 hover:from-danger-600 hover:to-danger-700 shadow-glow animate-pulse' 
+            : 'bg-gradient-to-r from-primary-500 to-secondary-600 hover:from-primary-600 hover:to-secondary-700 shadow-glow'
           }
           disabled:opacity-50 disabled:cursor-not-allowed
-          focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2
+          focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2
         `}
       >
         {isProcessing ? (
@@ -273,14 +273,14 @@ export default function VoiceRecorder({ onTranscriptionComplete, disabled = fals
         
         {/* Recording indicator ring */}
         {isRecording && (
-          <span className="absolute inset-0 rounded-full border-2 border-red-300 animate-ping" />
+          <span className="absolute inset-0 rounded-full border-2 border-danger-300 animate-ping" />
         )}
       </button>
 
       {/* Recording Time Display */}
       {isRecording && (
         <div className="mt-2 text-center">
-          <span className="text-sm font-mono text-gray-600 dark:text-gray-400">
+          <span className="text-sm font-mono text-danger-300">
             🔴 {formatTime(recordingTime)}
           </span>
         </div>
@@ -293,14 +293,14 @@ export default function VoiceRecorder({ onTranscriptionComplete, disabled = fals
             ref={canvasRef}
             width={300}
             height={60}
-            className="w-full rounded-lg border border-purple-200 dark:border-purple-800"
+            className="w-full rounded-lg border border-secondary-500/30 bg-dark-900/30"
           />
         </div>
       )}
 
       {/* Processing State */}
       {isProcessing && (
-        <div className="mt-3 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400" role="status" aria-live="polite">
+        <div className="mt-3 flex items-center gap-2 text-sm text-info-300" role="status" aria-live="polite">
           <Loader2 className="w-4 h-4 animate-spin" />
           <span>Transcribiendo audio con Whisper...</span>
         </div>
@@ -308,7 +308,7 @@ export default function VoiceRecorder({ onTranscriptionComplete, disabled = fals
 
       {/* Success Message */}
       {success && (
-        <div className="mt-3 flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+        <div className="mt-3 flex items-center gap-2 text-sm text-success-300">
           <CheckCircle className="w-4 h-4" />
           <span>¡Transcripción completada!</span>
         </div>
@@ -316,7 +316,7 @@ export default function VoiceRecorder({ onTranscriptionComplete, disabled = fals
 
       {/* Error Message */}
       {error && (
-        <div className="mt-3 flex items-start gap-2 text-sm text-red-600 dark:text-red-400">
+        <div className="mt-3 flex items-start gap-2 text-sm text-danger-300">
           <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
           <span>{error}</span>
         </div>
@@ -324,9 +324,9 @@ export default function VoiceRecorder({ onTranscriptionComplete, disabled = fals
 
       {/* Permission Denied Message */}
       {permissionStatus === 'denied' && (
-        <div className="mt-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-          <p className="text-sm text-yellow-800 dark:text-yellow-200">
-            <strong>Permisos de micrófono denegados.</strong><br />
+        <div className="mt-3 p-3 bg-warning-500/10 border border-warning-500/30 rounded-xl backdrop-blur-sm">
+          <p className="text-sm text-warning-300">
+            <strong className="font-semibold">Permisos de micrófono denegados.</strong><br />
             Habilita el acceso al micrófono en la configuración de tu navegador.
           </p>
         </div>

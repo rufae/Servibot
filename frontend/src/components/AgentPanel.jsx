@@ -231,7 +231,42 @@ function CalendarModal({ events, onClose }) {
   )
 }
 
-function EmailModal({ mails, onClose }) {
+function EmailModal({ mails: initialMails, onClose }) {
+  const [mails, setMails] = useState(initialMails)
+  const [loading, setLoading] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
+  const [pageToken, setPageToken] = useState(null)
+  
+  const loadMoreEmails = async () => {
+    if (loading || !hasMore) return
+    
+    setLoading(true)
+    try {
+      const query = pageToken ? `&pageToken=${pageToken}` : ''
+      const response = await api.get(`/api/tools/gmail/messages?max_results=20${query}`)
+      
+      if (response.messages && response.messages.length > 0) {
+        setMails(prev => [...prev, ...response.messages])
+        setPageToken(response.next_page_token || null)
+        setHasMore(!!response.next_page_token)
+      } else {
+        setHasMore(false)
+      }
+    } catch (e) {
+      console.warn('Failed to load more emails:', e)
+      setHasMore(false)
+    } finally {
+      setLoading(false)
+    }
+  }
+  
+  const handleScroll = (e) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.target
+    if (scrollHeight - scrollTop <= clientHeight + 100) {
+      loadMoreEmails()
+    }
+  }
+  
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md animate-fadeIn" onClick={onClose}>
       <div className="bg-dark-900/95 backdrop-blur-xl rounded-3xl shadow-2xl border border-dark-800 w-full max-w-4xl max-h-[85vh] flex flex-col m-4 animate-scaleIn" onClick={e => e.stopPropagation()}>
@@ -240,7 +275,10 @@ function EmailModal({ mails, onClose }) {
             <div className="w-12 h-12 bg-gradient-to-br from-success-500/20 to-info-500/20 rounded-2xl flex items-center justify-center">
               <Mail className="w-6 h-6 text-success-400" />
             </div>
-            <h2 className="text-2xl font-bold text-white">Todos los Correos</h2>
+            <div>
+              <h2 className="text-2xl font-bold text-white">Todos los Correos</h2>
+              <p className="text-sm text-dark-400">{mails.length} correos cargados</p>
+            </div>
           </div>
           <button 
             onClick={onClose} 
@@ -250,35 +288,50 @@ function EmailModal({ mails, onClose }) {
           </button>
         </div>
         
-        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar" onScroll={handleScroll}>
           {mails.length === 0 ? (
             <div className="text-center py-12">
               <Mail className="w-16 h-16 mx-auto mb-4 text-[var(--text-secondary)] opacity-50" />
               <p className="text-[var(--text-secondary)]">No hay correos recientes</p>
             </div>
           ) : (
-            <div className="space-y-3">
-              {mails.map(mail => (
-                <div key={mail.id} className="p-4 rounded-xl bg-gradient-to-r from-[var(--bg-main)]/50 to-transparent border border-[var(--bg-main)] hover:border-green-500/30 transition-all group">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <h3 className="text-base font-semibold mb-1 group-hover:text-green-400 transition-colors line-clamp-1">{mail.subject}</h3>
-                      <div className="flex items-center gap-1 text-sm text-[var(--text-secondary)] mb-2">
-                        <User className="w-4 h-4" />
-                        <span>{mail.from}</span>
+            <>
+              <div className="space-y-3">
+                {mails.map(mail => (
+                  <div key={mail.id} className="p-4 rounded-xl bg-gradient-to-r from-[var(--bg-main)]/50 to-transparent border border-[var(--bg-main)] hover:border-green-500/30 transition-all group">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <h3 className="text-base font-semibold mb-1 group-hover:text-green-400 transition-colors line-clamp-1">{mail.subject}</h3>
+                        <div className="flex items-center gap-1 text-sm text-[var(--text-secondary)] mb-2">
+                          <User className="w-4 h-4" />
+                          <span>{mail.from}</span>
+                        </div>
+                        {mail.snippet && (
+                          <p className="text-sm text-[var(--text-secondary)] line-clamp-2">{mail.snippet}</p>
+                        )}
                       </div>
-                      {mail.snippet && (
-                        <p className="text-sm text-[var(--text-secondary)] line-clamp-2">{mail.snippet}</p>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 ml-4">
-                      <div className="text-xs text-[var(--text-secondary)] whitespace-nowrap">{mail.time || mail.internalDate || ''}</div>
-                      <ChevronRight className="w-5 h-5 text-[var(--text-secondary)] opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <div className="flex items-center gap-2 ml-4">
+                        <div className="text-xs text-[var(--text-secondary)] whitespace-nowrap">{mail.time || mail.internalDate || ''}</div>
+                        <ChevronRight className="w-5 h-5 text-[var(--text-secondary)] opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
                     </div>
                   </div>
+                ))}
+              </div>
+              
+              {loading && (
+                <div className="text-center py-4">
+                  <Loader2 className="w-6 h-6 animate-spin text-primary-400 mx-auto" />
+                  <p className="text-sm text-dark-400 mt-2">Cargando más correos...</p>
                 </div>
-              ))}
-            </div>
+              )}
+              
+              {!hasMore && mails.length > 0 && (
+                <div className="text-center py-4 text-sm text-dark-400">
+                  No hay más correos para cargar
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -504,7 +557,7 @@ export default function AgentPanel({ activity = [], setAgentActivity = () => {} 
       text: 'Se desconectará tu calendario y correo',
       icon: 'warning',
       showCancelButton: true,
-      confirmButtonColor: '#ef4444',
+      confirmButtonColor: '#3B82F6',
       cancelButtonColor: '#6b7280',
       confirmButtonText: 'Sí, desconectar',
       cancelButtonText: 'Cancelar',

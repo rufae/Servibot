@@ -8,14 +8,21 @@ export const chatService = {
   /**
    * Send a message to the chat endpoint
    */
-  sendMessage: async (message, context = {}) => {
+  sendMessage: async (message, context = {}, conversationHistory = null) => {
     try {
       // Ensure context is an object for backend validation (FastAPI expects dict)
       const safeContext = (context && typeof context === 'object' && !Array.isArray(context)) ? context : {}
-      const response = await api.post('/api/chat', {
+      const payload = {
         message,
         context: safeContext,
-      })
+      }
+      
+      // Include conversation history for contextual awareness
+      if (conversationHistory && Array.isArray(conversationHistory)) {
+        payload.conversation_history = conversationHistory
+      }
+      
+      const response = await api.post('/api/chat', payload)
       return {
         success: true,
         data: normalizeChatResponse(response),

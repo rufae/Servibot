@@ -51,9 +51,9 @@ export default function GoogleToolsTest() {
 
   if (!googleConnected) {
     return (
-      <div className="p-4 bg-gray-800/50 border border-gray-700 rounded-lg">
-        <p className="text-sm text-gray-400">
-          Connect your Google account to test Calendar and Gmail integration
+      <div className="p-4 glass-effect border border-dark-800 rounded-xl backdrop-blur-sm">
+        <p className="text-sm text-dark-400">
+          Conecta tu cuenta de Google para probar la integración con Calendar y Gmail
         </p>
       </div>
     )
@@ -61,9 +61,10 @@ export default function GoogleToolsTest() {
 
   return (
     <div className="space-y-4">
-      <div className="p-4 bg-gray-800/50 border border-gray-700 rounded-lg">
-        <h3 className="text-lg font-semibold text-white mb-3">
-          🧪 Test Google Tools
+      <div className="p-4 glass-effect border border-dark-800 rounded-xl backdrop-blur-sm">
+        <h3 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
+          <span className="text-2xl">🧪</span>
+          <span>Probar Herramientas de Google</span>
         </h3>
 
         <div className="space-y-3">
@@ -72,9 +73,9 @@ export default function GoogleToolsTest() {
             <button
               onClick={handleListCalendar}
               disabled={loading}
-              className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white rounded-lg transition-colors disabled:cursor-not-allowed"
+              className="w-full px-4 py-2.5 bg-gradient-to-r from-info-500 to-primary-500 hover:from-info-600 hover:to-primary-600 disabled:from-dark-800 disabled:to-dark-900 text-white rounded-xl transition-all disabled:cursor-not-allowed shadow-glow hover:shadow-glow-lg hover:scale-105 active:scale-95 disabled:scale-100 font-medium"
             >
-              {loading ? '⏳ Loading...' : '📅 List Calendar Events (Next 5)'}
+              {loading ? '⏳ Cargando...' : '📅 Listar Eventos del Calendario (Próximos 5)'}
             </button>
           </div>
 
@@ -83,50 +84,52 @@ export default function GoogleToolsTest() {
             <button
               onClick={handleSendTestEmail}
               disabled={loading}
-              className="w-full px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white rounded-lg transition-colors disabled:cursor-not-allowed"
+              className="w-full px-4 py-2.5 bg-gradient-to-r from-success-500 to-secondary-500 hover:from-success-600 hover:to-secondary-600 disabled:from-dark-800 disabled:to-dark-900 text-white rounded-xl transition-all disabled:cursor-not-allowed shadow-glow hover:shadow-glow-lg hover:scale-105 active:scale-95 disabled:scale-100 font-medium"
             >
-              {loading ? '⏳ Sending...' : '✉️ Send Test Email'}
+              {loading ? '⏳ Enviando...' : '✉️ Enviar Email de Prueba'}
             </button>
           </div>
         </div>
 
         {/* Error Display */}
         {error && (
-          <div className="mt-3 p-3 bg-red-500/10 border border-red-500/30 rounded text-sm text-red-400">
-            <strong>Error:</strong> {error}
+          <div className="mt-3 p-3 bg-danger-500/10 border border-danger-500/30 rounded-xl text-sm text-danger-300 backdrop-blur-sm animate-scaleIn">
+            <strong className="font-semibold">Error:</strong> {error}
           </div>
         )}
 
         {/* Calendar Results */}
         {calendarEvents && (
-          <div className="mt-3 p-3 bg-blue-500/10 border border-blue-500/30 rounded">
-            <h4 className="text-sm font-semibold text-blue-400 mb-2">
-              Calendar Events:
+          <div className="mt-3 p-3 bg-info-500/10 border border-info-500/30 rounded-xl backdrop-blur-sm animate-scaleIn">
+            <h4 className="text-sm font-semibold text-info-300 mb-2 flex items-center gap-2">
+              <span>📅</span>
+              <span>Eventos del Calendario:</span>
             </h4>
             {calendarEvents.events && calendarEvents.events.length > 0 ? (
-              <ul className="space-y-2 text-sm text-gray-300">
+              <ul className="space-y-2 text-sm text-dark-200">
                 {calendarEvents.events.map((event, idx) => (
-                  <li key={idx} className="pl-3 border-l-2 border-blue-500/30">
-                    <div className="font-medium">{event.summary || 'Untitled'}</div>
-                    <div className="text-xs text-gray-400">
+                  <li key={idx} className="pl-3 border-l-2 border-info-500/50 hover:border-info-500/80 transition-colors">
+                    <div className="font-medium text-white">{event.summary || 'Sin título'}</div>
+                    <div className="text-xs text-dark-400">
                       {event.start} - {event.end}
                     </div>
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="text-sm text-gray-400">No upcoming events found</p>
+              <p className="text-sm text-dark-400">No se encontraron eventos próximos</p>
             )}
           </div>
         )}
 
         {/* Email Results */}
         {emailResult && (
-          <div className="mt-3 p-3 bg-green-500/10 border border-green-500/30 rounded">
-            <h4 className="text-sm font-semibold text-green-400 mb-2">
-              ✅ Email Sent Successfully
+          <div className="mt-3 p-3 bg-success-500/10 border border-success-500/30 rounded-xl backdrop-blur-sm animate-scaleIn">
+            <h4 className="text-sm font-semibold text-success-300 mb-2 flex items-center gap-2">
+              <span>✅</span>
+              <span>Email Enviado Exitosamente</span>
             </h4>
-            <pre className="text-xs text-gray-300 overflow-x-auto">
+            <pre className="text-xs text-dark-200 overflow-x-auto bg-dark-900/50 p-2 rounded-lg custom-scrollbar">
               {JSON.stringify(emailResult, null, 2)}
             </pre>
           </div>

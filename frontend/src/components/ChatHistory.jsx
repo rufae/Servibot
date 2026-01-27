@@ -103,7 +103,7 @@ export default function ChatHistory({ messages = [], isLoading = false }) {
                 )
               )}
 
-              <div className={`max-w-[85%] sm:max-w-[80%] rounded-2xl px-4 sm:px-5 py-3 shadow-lg break-words ${msg.role === 'user' ? 'bg-gradient-to-br from-primary-600 to-secondary-600 text-white' : msg.error ? 'bg-danger-500/20 text-danger-300 border border-danger-500/50' : msg.streaming ? 'bg-gradient-to-br from-dark-800/80 to-dark-900/80 text-white border border-primary-400/50 animate-pulse backdrop-blur-sm' : 'bg-gradient-to-br from-dark-800/80 to-dark-900/80 text-white border border-dark-700 backdrop-blur-sm'}`}>
+              <div className={`max-w-[85%] sm:max-w-[80%] rounded-2xl px-4 sm:px-5 py-3 shadow-lg break-words ${msg.role === 'user' ? 'bg-gradient-to-br from-primary-500 via-secondary-500 to-accent-500 text-white shadow-glow-strong' : msg.error ? 'bg-danger-500/20 text-danger-300 border border-danger-500/50' : msg.streaming ? 'bg-gradient-to-br from-slate-700/80 to-slate-800/80 text-white border border-primary-400/50 animate-pulse backdrop-blur-sm' : 'bg-gradient-to-br from-slate-700/80 to-slate-800/80 text-white border border-slate-600/50 backdrop-blur-sm'}`}>
                 {renderMessageBody(msg)}
 
                 {msg.role === 'assistant' && !msg.error && !msg.streaming && msg.content && (
@@ -184,8 +184,8 @@ export default function ChatHistory({ messages = [], isLoading = false }) {
               } 
               setIsAutoScrollEnabled(true) 
             }} 
-            className="py-2 px-3 sm:px-4 bg-gradient-to-r from-primary-500 to-secondary-500 text-white rounded-full text-xs sm:text-sm font-medium shadow-glow hover:scale-105 hover:shadow-glow-lg transition-all animate-slideIn flex items-center gap-1.5 sm:gap-2 pointer-events-auto"
-          >
+            className="py-2 px-3 sm:px-4 bg-gradient-to-r from-primary-500 via-secondary-500 to-accent-500 text-white rounded-full text-xs sm:text-sm font-medium shadow-glow-strong hover:scale-110 hover:shadow-[0_0_50px_rgba(59,130,246,0.8)] transition-all animate-slideIn flex items-center gap-1.5 sm:gap-2 pointer-events-auto">
+          
             <span>↓</span>
             <span className="hidden sm:inline">Ir al final</span>
             <span className="sm:hidden">Final</span>
@@ -194,9 +194,9 @@ export default function ChatHistory({ messages = [], isLoading = false }) {
       )}
 
       {showSourceModal && selectedSource && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fadeIn">
-          <div className="bg-dark-900/95 backdrop-blur-xl rounded-3xl shadow-2xl border border-dark-800 max-w-2xl w-full max-h-[80vh] flex flex-col animate-scaleIn">
-            <div className="p-5 border-b border-dark-800 flex items-center justify-between bg-gradient-to-r from-primary-500/10 to-secondary-500/10">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-lg flex items-center justify-center z-50 p-4 animate-fadeIn">
+          <div className="glass-effect rounded-3xl shadow-2xl border border-white/10 max-w-2xl w-full max-h-[80vh] flex flex-col animate-scaleIn bg-slate-800/90">
+            <div className="p-5 border-b border-white/10 flex items-center justify-between bg-gradient-to-r from-primary-500/20 via-secondary-500/20 to-accent-500/20">
               <div className="flex items-center gap-3">
                 <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-primary-500/20 to-secondary-500/20 flex items-center justify-center shadow-glow">
                   <FileText className="w-5 h-5 text-primary-400" />
@@ -221,8 +221,8 @@ export default function ChatHistory({ messages = [], isLoading = false }) {
               </div>
             </div>
 
-            <div className="p-5 border-t border-dark-800 flex gap-3">
-              <button onClick={closeSourceModal} className="flex-1 py-2.5 bg-gradient-to-r from-primary-500 to-secondary-600 hover:from-primary-600 hover:to-secondary-700 text-white rounded-xl transition-all font-semibold hover:scale-105 active:scale-95 shadow-glow">Cerrar</button>
+            <div className="p-5 border-t border-white/10 flex gap-3">
+              <button onClick={closeSourceModal} className="flex-1 py-2.5 bg-gradient-to-r from-primary-500 via-secondary-500 to-accent-500 hover:from-primary-600 hover:via-secondary-600 hover:to-accent-600 text-white rounded-xl transition-all font-semibold hover:scale-105 active:scale-95 shadow-glow-strong">Cerrar</button>
             </div>
           </div>
         </div>

@@ -354,7 +354,7 @@ export default function AgentPanel({ activity = [], setAgentActivity = () => {} 
         ) : connected ? (
           <div className="flex items-center gap-2">
             <span className="px-2 py-1 bg-green-500/10 text-green-400 text-xs rounded-md border border-green-500/20">Conectado</span>
-            <button onClick={handleDisconnect} className="text-xs text-red-400 hover:text-red-300">Desconectar</button>
+            <button onClick={handleDisconnect} className="text-xs text-danger-400 hover:text-danger-300">Desconectar</button>
           </div>
         ) : (
           <button onClick={handleConnect} className="px-3 py-1.5 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white text-xs rounded-lg transition-all">

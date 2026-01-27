@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { Upload, FileText, Image, Loader2, CheckCircle, XCircle } from 'lucide-react'
+import { Upload, FileText, Image, Loader2, CheckCircle, XCircle, Scan, RefreshCw } from 'lucide-react'
 import { uploadService } from '../services'
 import { API_BASE_URL } from '../services/api'
 
@@ -8,6 +8,11 @@ export default function FileUpload() {
   const [uploadedFiles, setUploadedFiles] = useState([])
   const [isUploading, setIsUploading] = useState(false)
   const fileInputRef = useRef(null)
+
+  const handleRetry = async (fileName) => {
+    // Remove failed file and prompt user to re-upload
+    setUploadedFiles(prev => prev.filter(f => f.name !== fileName))
+  }
 
   const handleDragOver = (e) => {
     e.preventDefault()
@@ -133,18 +138,21 @@ export default function FileUpload() {
   }
 
   return (
-    <div className="bg-gradient-to-br from-gray-800 via-gray-900 to-gray-800 rounded-2xl shadow-2xl border border-gray-700 p-6 overflow-hidden">
+    <div className="glass-effect rounded-3xl shadow-2xl border border-white/10 p-5 sm:p-6 overflow-hidden backdrop-blur-xl bg-slate-800/40">
       <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center">
-          <Upload className="w-5 h-5 text-white" />
+        <div className="relative group">
+          <div className="absolute inset-0 bg-gradient-to-br from-info-500 to-primary-500 rounded-xl blur-md opacity-60 group-hover:opacity-100 transition-opacity"></div>
+          <div className="relative w-10 h-10 rounded-xl bg-gradient-to-br from-info-500 via-primary-500 to-secondary-500 flex items-center justify-center shadow-glow-strong">
+            <Upload className="w-5 h-5 text-white" />
+          </div>
         </div>
         <div>
-          <h2 className="text-xl font-bold text-white">Subir Documentos</h2>
-          <p className="text-xs text-gray-400">Arrastra archivos o haz clic para seleccionar</p>
+          <h2 className="text-lg sm:text-xl font-bold text-white">Subir Documentos</h2>
+          <p className="text-xs text-dark-400">Arrastra archivos o haz clic para seleccionar</p>
         </div>
       </div>
       
-      {/* Drop Zone */}
+      {/* Drop Zone - collapsed by default; expands on hover or when dragging */}
       <div
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -159,24 +167,24 @@ export default function FileUpload() {
             fileInputRef.current?.click()
           }
         }}
-        className={`relative border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all duration-300 ${
+        className={`relative group border-2 border-dashed rounded-2xl text-center cursor-pointer transition-all duration-300 backdrop-blur-sm overflow-hidden p-3 sm:p-4 group-hover:p-8 group-hover:sm:p-10 ${
           isDragging
-            ? 'border-primary-500 bg-gradient-to-br from-primary-500/20 to-purple-500/20 scale-[1.02]'
-            : 'border-gray-600 hover:border-gray-500 hover:bg-gray-800/50'
+            ? 'border-primary-400 bg-gradient-to-br from-primary-500/20 to-secondary-500/20 scale-[1.02] shadow-glow'
+            : 'border-dark-700 hover:border-dark-600 hover:bg-dark-900/50'
         }`}
       >
         <div className={`transition-all duration-300 ${isDragging ? 'scale-110' : 'scale-100'}`}>
-          <div className={`w-16 h-16 mx-auto mb-4 rounded-2xl flex items-center justify-center ${
+          <div className={`w-10 h-10 sm:w-12 sm:h-12 mx-auto mb-2 rounded-2xl flex items-center justify-center ${
             isDragging 
-              ? 'bg-gradient-to-br from-primary-500 to-purple-500' 
-              : 'bg-gradient-to-br from-gray-700 to-gray-800'
+              ? 'bg-gradient-to-br from-primary-500 to-secondary-500 shadow-glow' 
+              : 'bg-transparent'
           }`}>
-            <Upload className={`w-8 h-8 ${isDragging ? 'text-white animate-bounce' : 'text-gray-400'}`} />
+            <Upload className={`w-5 h-5 sm:w-6 sm:h-6 ${isDragging ? 'text-white animate-bounce' : 'text-dark-400'}`} />
           </div>
-          <p className="text-gray-200 mb-2 font-medium">
+          <p className={`text-white mb-2 font-medium text-sm sm:text-base transition-all duration-300 overflow-hidden ${isDragging ? 'opacity-100 max-h-40' : 'opacity-0 max-h-0 group-hover:opacity-100 group-hover:max-h-40'}`}>
             {isDragging ? '¡Suelta aquí!' : 'Arrastra archivos o haz clic'}
           </p>
-          <p className="text-sm text-gray-500">
+          <p className={`text-xs sm:text-sm text-dark-500 transition-all duration-300 overflow-hidden ${isDragging ? 'opacity-100 max-h-40' : 'opacity-0 max-h-0 group-hover:opacity-100 group-hover:max-h-40'}`}>
             Formatos: PDF, imágenes (PNG, JPG), archivos de texto
           </p>
         </div>
@@ -195,39 +203,61 @@ export default function FileUpload() {
       {uploadedFiles.length > 0 && (
         <div className="mt-6 space-y-3">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-gray-300 uppercase flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-dark-300 uppercase flex items-center gap-2">
               <span className="w-1 h-1 rounded-full bg-primary-400"></span>
               Archivos subidos ({uploadedFiles.length})
             </h3>
           </div>
-          <div className="space-y-2 max-h-64 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
+          <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar">
             {uploadedFiles.map((file, idx) => (
               <div
                 key={idx}
-                className="flex items-center justify-between bg-gradient-to-r from-gray-800 to-gray-900 rounded-xl p-4 border border-gray-700 hover:border-gray-600 transition-all group"
+                className="flex items-center justify-between glass-effect rounded-xl p-3 sm:p-4 border border-dark-800 hover:border-dark-700 transition-all group backdrop-blur-sm"
               >
                 <div className="flex items-center space-x-3 flex-1 min-w-0">
-                  <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500/20 to-cyan-500/20 flex items-center justify-center flex-shrink-0 border border-blue-500/30">
+                  <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-gradient-to-br from-info-500/20 to-primary-500/20 flex items-center justify-center flex-shrink-0 border border-info-500/30">
                     {getFileIcon(file.name)}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate text-white group-hover:text-primary-300 transition-colors">{file.name}</p>
-                    <p className="text-xs text-gray-500">{formatFileSize(file.size)}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium truncate text-white group-hover:text-primary-300 transition-colors">{file.name}</p>
+                      {file.ocr_used && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-info-500/20 text-info-300 text-[10px] rounded border border-info-500/30 whitespace-nowrap">
+                          <Scan className="w-3 h-3" />
+                          <span className="hidden sm:inline">OCR</span>
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-dark-500">
+                      <span>{formatFileSize(file.size)}</span>
+                      {file.status === 'error' && file.error && (
+                        <span className="text-danger-400 truncate">{file.error}</span>
+                      )}
+                    </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-3 ml-3">
+                <div className="flex items-center gap-2 sm:gap-3 ml-2 sm:ml-3 flex-shrink-0">
                   <div className="flex-shrink-0">
                     {file.status === 'uploading' && (
-                      <div className="flex items-center gap-2 text-blue-400">
+                      <div className="flex items-center gap-2 text-info-400">
                         <Loader2 className="w-5 h-5 animate-spin" />
-                        <span className="text-xs">{file.progress || 0}%</span>
+                        <span className="text-xs hidden sm:inline">{file.progress || 0}%</span>
                       </div>
                     )}
                     {file.status === 'success' && (
-                      <CheckCircle className="w-5 h-5 text-green-400" />
+                      <CheckCircle className="w-5 h-5 text-success-400" />
                     )}
                     {file.status === 'error' && (
-                      <XCircle className="w-5 h-5 text-red-400" />
+                      <div className="flex items-center gap-2">
+                        <XCircle className="w-5 h-5 text-danger-400" />
+                        <button
+                          onClick={() => handleRetry(file.name)}
+                          className="p-1.5 sm:p-2 bg-danger-500/10 hover:bg-danger-500/20 border border-danger-500/30 rounded-lg transition-all hover:scale-105 active:scale-95"
+                          title="Reintentar subida"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-danger-400" />
+                        </button>
+                      </div>
                     )}
                   </div>
                   <div className="flex-shrink-0">
@@ -278,33 +308,33 @@ export function IndexButton({ file, onUpdate }) {
   return (
     <div className="flex items-center space-x-2">
       {file.indexing_status === 'indexed' ? (
-        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500/20 rounded-lg border border-green-500/30">
-          <CheckCircle className="w-3.5 h-3.5 text-green-400" />
-          <span className="text-xs text-green-400 font-medium">Indexado</span>
+        <div className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-success-500/20 rounded-lg border border-success-500/30">
+          <CheckCircle className="w-3.5 h-3.5 text-success-400" />
+          <span className="text-xs text-success-400 font-medium hidden sm:inline">Indexado</span>
         </div>
       ) : file.indexing_status === 'indexing' || file.indexing_status === 'retrying' ? (
-        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/20 rounded-lg border border-blue-500/30">
-          <Loader2 className="w-3.5 h-3.5 text-blue-400 animate-spin" />
-          <span className="text-xs text-blue-400 font-medium">Indexando...</span>
+        <div className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-info-500/20 rounded-lg border border-info-500/30">
+          <Loader2 className="w-3.5 h-3.5 text-info-400 animate-spin" />
+          <span className="text-xs text-info-400 font-medium hidden sm:inline">Indexando...</span>
         </div>
       ) : (
         <button
           onClick={indexFile}
           disabled={indexing}
-          className="px-3 py-1.5 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white rounded-lg text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-blue-500/30 transform hover:scale-105"
+          className="px-2.5 sm:px-3 py-1.5 bg-gradient-to-r from-info-500 to-primary-500 hover:from-info-600 hover:to-primary-600 text-white rounded-lg text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-glow hover:shadow-glow-lg transform hover:scale-105 active:scale-95"
         >
           {indexing ? 'Indexando...' : 'Reindexar'}
         </button>
       )}
       {file.indexing_status === 'error' && (
-        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/20 rounded-lg border border-red-500/30">
-          <XCircle className="w-3.5 h-3.5 text-red-400" />
-          <span className="text-xs text-red-400 font-medium">Error · {file.attempts || 0} intentos</span>
+        <div className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-danger-500/20 rounded-lg border border-danger-500/30">
+          <XCircle className="w-3.5 h-3.5 text-danger-400" />
+          <span className="text-xs text-danger-400 font-medium hidden sm:inline">Error · {file.attempts || 0} intentos</span>
         </div>
       )}
       {error && (
-        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/20 rounded-lg border border-red-500/30">
-          <span className="text-xs text-red-400 font-medium">Error</span>
+        <div className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-danger-500/20 rounded-lg border border-danger-500/30">
+          <span className="text-xs text-danger-400 font-medium">Error</span>
         </div>
       )}
     </div>

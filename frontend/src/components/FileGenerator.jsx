@@ -203,7 +203,7 @@ export default function FileGenerator({ messages, currentConversation = null }) 
           className={`
             flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all
             ${canGenerate && !isGenerating
-              ? 'bg-gradient-to-r from-red-500 to-pink-600 hover:from-red-600 hover:to-pink-700 text-white shadow-lg hover:shadow-xl'
+              ? 'bg-gradient-to-r from-primary-500 to-secondary-600 hover:from-primary-600 hover:to-secondary-700 text-white shadow-lg hover:shadow-xl'
               : 'bg-gray-300 dark:bg-gray-700 text-gray-500 dark:text-gray-500 cursor-not-allowed'
             }
             disabled:opacity-50
@@ -265,13 +265,13 @@ export default function FileGenerator({ messages, currentConversation = null }) 
       )}
 
       {error && (
-        <div className="mt-3 flex items-start gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-          <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+        <div className="mt-3 flex items-start gap-2 p-3 bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-800 rounded-lg">
+          <AlertCircle className="w-5 h-5 text-danger-600 dark:text-danger-400 flex-shrink-0 mt-0.5" />
           <div className="flex-1">
-            <p className="text-sm text-red-800 dark:text-red-200 font-medium">
+            <p className="text-sm text-danger-800 dark:text-danger-200 font-medium">
               Error al generar archivo
             </p>
-            <p className="text-xs text-red-700 dark:text-red-300 mt-1">
+            <p className="text-xs text-danger-700 dark:text-danger-300 mt-1">
               {error}
             </p>
           </div>

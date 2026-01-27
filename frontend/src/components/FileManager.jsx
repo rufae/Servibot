@@ -122,7 +122,7 @@ export default function FileManager({ isOpen, onClose }) {
       case 'indexed':
         return <CheckCircle className="w-4 h-4 text-green-400" />
       case 'error':
-        return <AlertTriangle className="w-4 h-4 text-red-400" />
+        return <AlertTriangle className="w-4 h-4 text-danger-400" />
       case 'indexing':
       case 'retrying':
         return <RefreshCw className="w-4 h-4 text-blue-400 animate-spin" />
@@ -206,7 +206,7 @@ export default function FileManager({ isOpen, onClose }) {
               <button
                 onClick={() => confirmDelete(handleDeleteSelected)}
                 disabled={deleting}
-                className="text-sm bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors px-4 py-1.5 rounded-lg flex items-center gap-2 border border-red-500/30"
+                className="text-sm bg-danger-500/20 text-danger-400 hover:bg-danger-500/30 transition-colors px-4 py-1.5 rounded-lg flex items-center gap-2 border border-danger-500/30"
               >
                 <Trash2 className="w-4 h-4" />
                 Eliminar seleccionados
@@ -215,7 +215,7 @@ export default function FileManager({ isOpen, onClose }) {
             <button
               onClick={() => confirmDelete(handleClearAll)}
               disabled={deleting || files.length === 0}
-              className="text-sm bg-red-600/20 text-red-300 hover:bg-red-600/30 transition-colors px-4 py-1.5 rounded-lg flex items-center gap-2 border border-red-600/30 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="text-sm bg-danger-600/20 text-danger-300 hover:bg-danger-600/30 transition-colors px-4 py-1.5 rounded-lg flex items-center gap-2 border border-danger-600/30 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <AlertTriangle className="w-4 h-4" />
               Limpiar todo
@@ -280,7 +280,7 @@ export default function FileManager({ isOpen, onClose }) {
                   <div className="flex-shrink-0">
                     <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${
                       file.indexStatus?.status === 'indexed' ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
-                      file.indexStatus?.status === 'error' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                      file.indexStatus?.status === 'error' ? 'bg-danger-500/20 text-danger-400 border border-danger-500/30' :
                       'bg-gray-700 text-gray-300 border border-gray-600'
                     }`}>
                       {getStatusIcon(file.indexStatus?.status)}
@@ -309,11 +309,11 @@ export default function FileManager({ isOpen, onClose }) {
 
         {/* Confirmation Modal */}
         {showConfirm && (
-          <div className="absolute inset-0 bg-black/80 flex items-center justify-center p-6 backdrop-blur-sm">
-            <div className="bg-gray-800 rounded-xl border border-red-500/30 p-6 max-w-md w-full shadow-2xl">
+            <div className="absolute inset-0 bg-black/80 flex items-center justify-center p-6 backdrop-blur-sm">
+            <div className="bg-gray-800 rounded-xl border border-danger-500/30 p-6 max-w-md w-full shadow-2xl">
               <div className="flex items-start gap-4 mb-4">
-                <div className="flex-shrink-0 w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center">
-                  <AlertTriangle className="w-6 h-6 text-red-400" />
+                <div className="flex-shrink-0 w-12 h-12 rounded-full bg-danger-500/20 flex items-center justify-center">
+                  <AlertTriangle className="w-6 h-6 text-danger-400" />
                 </div>
                 <div>
                   <h3 className="text-lg font-bold text-white mb-2">¿Estás seguro?</h3>
@@ -340,7 +340,7 @@ export default function FileManager({ isOpen, onClose }) {
                     if (confirmAction) await confirmAction()
                   }}
                   disabled={deleting}
-                  className="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50"
+                  className="px-4 py-2 text-sm bg-danger-600 hover:bg-danger-700 text-white rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50"
                 >
                   {deleting ? (
                     <>
