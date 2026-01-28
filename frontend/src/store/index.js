@@ -48,6 +48,83 @@ export const useChatStore = create((set) => ({
 }))
 
 /**
+ * Contacts store - caches Google Contacts locally and supports forced reload
+ */
+export const useContactsStore = create((set, get) => ({
+  contacts: [],
+  lastUpdated: null,
+  isLoadingContacts: false,
+  errorContacts: null,
+
+  setContacts: (contacts) => {
+    const now = Date.now()
+    set({ contacts, lastUpdated: now, errorContacts: null })
+    try {
+      localStorage.setItem('contacts_cache', JSON.stringify({ contacts, lastUpdated: now }))
+    } catch (e) {
+      // ignore storage errors
+    }
+  },
+
+  clearContacts: () => {
+    set({ contacts: [], lastUpdated: null, errorContacts: null })
+    try { localStorage.removeItem('contacts_cache') } catch (e) {}
+  },
+
+  loadContacts: async (forceRefresh = false) => {
+    // If not forcing and we have a cache, use it
+    if (!forceRefresh) {
+      try {
+        const raw = localStorage.getItem('contacts_cache')
+        if (raw) {
+          const parsed = JSON.parse(raw)
+          if (parsed && Array.isArray(parsed.contacts) && parsed.contacts.length > 0) {
+            set({ contacts: parsed.contacts, lastUpdated: parsed.lastUpdated, errorContacts: null })
+            return
+          }
+        }
+      } catch (e) {
+        // continue to fetch if cache is invalid
+      }
+    }
+
+    set({ isLoadingContacts: true, errorContacts: null })
+
+    try {
+      const token = localStorage.getItem('auth_token')
+      if (!token) {
+        set({ errorContacts: 'No estás autenticado', isLoadingContacts: false })
+        return
+      }
+
+      const res = await fetch('http://localhost:8000/api/google/contacts?page_size=200', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+
+      if (res.status === 403) {
+        set({ errorContacts: 'Conecta tu cuenta de Google para ver tus contactos', isLoadingContacts: false })
+        return
+      }
+
+      if (!res.ok) {
+        throw new Error('Error al cargar contactos')
+      }
+
+      const data = await res.json()
+      const contacts = data.contacts || []
+      const now = Date.now()
+      set({ contacts, lastUpdated: now, isLoadingContacts: false, errorContacts: null })
+      try { localStorage.setItem('contacts_cache', JSON.stringify({ contacts, lastUpdated: now })) } catch (e) {}
+    } catch (err) {
+      console.error('Contacts load failed:', err)
+      set({ errorContacts: err.message || 'Error al cargar contactos', isLoadingContacts: false })
+    }
+  },
+
+  reloadContacts: () => get().loadContacts(true),
+}))
+
+/**
  * Global file upload store
  */
 export const useUploadStore = create((set) => ({

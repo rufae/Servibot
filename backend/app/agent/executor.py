@@ -5,6 +5,7 @@ Executes planned tasks using available tools.
 from typing import Dict, Any, Optional, List
 from pydantic import BaseModel
 import logging
+import re
 
 from app.agent.planner import ExecutionPlan, SubTask
 from app.core.config import settings
@@ -223,7 +224,6 @@ class Executor:
                     logger.info(f"🎯 Detected entity/topic: '{entity_filter}' - will filter RAG results")
                 
                 # Detect if user mentions a specific file name
-                import re
                 file_filter = None
                 # Match patterns like "CV.pdf", "daniel.txt", "archivo.xlsx"
                 file_mention = re.search(r'([\w-]+\.(?:pdf|txt|docx?|xlsx?|csv|md))', user_message, re.IGNORECASE)
@@ -241,6 +241,7 @@ class Executor:
                 
                 try:
                     # Perform semantic search with optional file filter
+                    logger.info(f"🔎 Calling semantic_search with filter_metadata: {file_filter}")
                     rag_results = semantic_search(user_message, top_k=5, filter_metadata=file_filter)
                     
                     if rag_results and len(rag_results) > 0:
@@ -263,6 +264,18 @@ class Executor:
                         # Combine results into summary
                         texts = [r.get("document", "") for r in rag_results]
                         sources = list(set([r.get("metadata", {}).get("source", "unknown") for r in rag_results]))
+
+                        # Log returned result identifiers for debugging file-scoped queries
+                        try:
+                            import hashlib
+                            ids = [str(r.get("metadata", {}).get("source", "unknown")) for r in rag_results]
+                            logger.info(f"🔎 RAG result sources: {ids}")
+                            # Hash top texts to detect duplicates across requests
+                            top_text_concat = "\n".join(texts[:3])
+                            h = hashlib.md5(top_text_concat.encode('utf-8')).hexdigest()
+                            logger.info(f"🔎 RAG summary MD5: {h}")
+                        except Exception:
+                            pass
                         
                         # Create summary from top results
                         summary = "\n\n".join(texts[:3])  # Top 3 chunks
@@ -310,7 +323,6 @@ class Executor:
                 logger.info(f"RAG context available - summary: {bool(rag_summary)}, sources: {len(rag_sources)}, filtered by: {filter_by_file}, message: {user_message[:50]}")
                 
                 # Extract subject from user message or use filtered file name
-                import re
                 if filter_by_file:
                     # Use the specific file name as subject
                     subject = filter_by_file.rsplit('.', 1)[0].replace('_', ' ').replace('-', ' ').title()
@@ -337,9 +349,14 @@ class Executor:
                         logger.info(f"🔍 RAG_SUMMARY length: {len(rag_summary)} chars")
                         logger.info(f"🔍 RAG_SUMMARY newlines: {rag_summary.count(chr(10))}")
                         logger.info(f"🔍 RAG_SUMMARY preview (first 500): {rag_summary[:500]}")
+                        try:
+                            import hashlib
+                            summary_hash = hashlib.md5(rag_summary.encode('utf-8')).hexdigest()
+                            logger.info(f"🔍 RAG_SUMMARY MD5: {summary_hash}")
+                        except Exception:
+                            pass
                         
                         # Parse key-value pairs from summary
-                        import re
                         lines = rag_summary.split('\n')
                         for line in lines:
                             # Match patterns like "Campo: Valor" or "Campo = Valor"
@@ -366,15 +383,24 @@ class Executor:
                     
                     # Check if LLM response is available from context (generated after execution)
                     llm_response = self.execution_context.get("llm_response", "")
-                    if llm_response and len(llm_response) > len(rag_summary or ""):
-                        # Use LLM response as it contains more context and better formatting
+                    try:
+                        import hashlib
+                        llm_hash = hashlib.md5((llm_response or "").encode('utf-8')).hexdigest() if llm_response else None
+                        logger.info(f"🔍 LLM response present: {bool(llm_response)}, MD5: {llm_hash}")
+                    except Exception:
+                        pass
+                    # Prefer explicit LLM response when present (user-requested output
+                    # should appear in the PDF even if it's shorter than the RAG summary)
+                    if llm_response and llm_response.strip():
+                        logger.info("🔎 Using LLM response as PDF content (preferred)")
                         content = f"# Informe: {subject}\n\n"
                         content += llm_response
+                    else:
+                        logger.info("🔎 Using RAG summary as PDF content")
                     
-                    if rag_sources:
-                        content += f"\n\n## Fuentes Consultadas\n\n"
-                        for src in rag_sources:
-                            content += f"- {src}\n"
+                    # Note: We intentionally do NOT append 'Fuentes Consultadas' into
+                    # the PDF body to keep documents concise. Sources remain available
+                    # in the metadata passed to the document generator.
                     
                     result_data = generator.generate_pdf(
                         title=f"Informe: {subject}",
@@ -441,7 +467,6 @@ class Executor:
                 user_id = self.execution_context.get("user_id", "default_user")
                 user_message = self.execution_context.get("user_message", "").lower()
                 
-                import re
                 from datetime import datetime, timedelta
                 
                 # CHECK FOR CONFIRMATION FIRST - before keyword detection!
@@ -787,21 +812,55 @@ class Executor:
                         else:
                             # Initial request - extract parameters from user message
                             # Extract title
+                            # Extract title - handle both explicit quotes and creative request
                             title = None
                             title_match = re.search(r'"([^"]+)"', user_message)
                             if title_match:
                                 title = title_match.group(1)
                             else:
-                                titulo_match = re.search(r'(?:título|titulo|titula?o?)[:\s]+([^,\.]+)', user_message)
-                                if titulo_match:
-                                    title = titulo_match.group(1).strip()
+                                # Check if user wants creative title generation
+                                creative_title_patterns = [
+                                    r'(?:título|titulo|titula?o?)\s+(?:que\s+)?(?:quieras|creativo|apropiado|adecuado|inventa|invéntate)',
+                                    r'(?:con|usando)\s+(?:el\s+)?(?:título|titulo)\s+(?:que\s+)?(?:quieras|prefieras|consideres)'
+                                ]
+                                is_creative_title = any(re.search(pattern, user_message, re.IGNORECASE) for pattern in creative_title_patterns)
+                                
+                                if not is_creative_title:
+                                    # Try extracting explicit title
+                                    titulo_match = re.search(r'(?:título|titulo|titula?o?)[:\s]+([^,\.]+)', user_message, re.IGNORECASE)
+                                    if titulo_match:
+                                        title = titulo_match.group(1).strip()
                             
-                            if not title:
-                                result_data = {"success": False, "error": "No se especificó título para el evento"}
-                            else:
-                                # Extract date
-                                event_start_time = None
-                                event_end_time = None
+                            # Extract date - handle both absolute and relative dates
+                            event_start_time = None
+                            event_end_time = None
+                            
+                            # Check for relative dates first (mañana, hoy, pasado mañana)
+                            from datetime import datetime, timedelta
+                            now = datetime.now()
+                            
+                            relative_date_match = re.search(r'\b(hoy|mañana|ma[ñn]ana|pasado\s+ma[ñn]ana|en\s+(\d+)\s+d[ií]as?)\b', user_message, re.IGNORECASE)
+                            if relative_date_match:
+                                relative_term = relative_date_match.group(1).lower()
+                                if 'hoy' in relative_term:
+                                    event_date = now.replace(hour=10, minute=0, second=0, microsecond=0)
+                                elif 'mañana' in relative_term or 'manana' in relative_term:
+                                    if 'pasado' in relative_term:
+                                        event_date = (now + timedelta(days=2)).replace(hour=10, minute=0, second=0, microsecond=0)
+                                    else:
+                                        event_date = (now + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
+                                elif relative_date_match.group(2):  # "en X días"
+                                    days = int(relative_date_match.group(2))
+                                    event_date = (now + timedelta(days=days)).replace(hour=10, minute=0, second=0, microsecond=0)
+                                else:
+                                    event_date = None
+                                
+                                if event_date:
+                                    event_start_time = event_date.isoformat()
+                                    event_end_time = (event_date + timedelta(hours=1)).isoformat()
+                            
+                            # If no relative date, try absolute date (29 Enero 2026)
+                            if not event_start_time:
                                 date_match = re.search(r'(?:para|el)?\s*(\d{1,2})\s+(?:de\s+)?(\w+)\s+(?:de\s+)?(\d{4})', user_message)
                                 if date_match:
                                     day = int(date_match.group(1))
@@ -813,27 +872,37 @@ class Executor:
                                         event_date = datetime(year, month, day, 10, 0)
                                         event_start_time = event_date.isoformat()
                                         event_end_time = (event_date + timedelta(hours=1)).isoformat()
-                                
-                                if not event_start_time:
-                                    result_data = {"success": False, "error": "No se especificó fecha para el evento"}
+                            
+                            # Validation
+                            if not event_start_time:
+                                result_data = {"success": False, "error": "No se especificó fecha para el evento"}
+                            else:
+                                # If no title provided and not requesting creative title,
+                                # allow the flow to continue and present a confirmation modal
+                                # so the user can edit the title.
+                                if is_creative_title:
+                                    title = "__GENERATE_CREATIVE_TITLE__"
                                 else:
-                                    # Initial request - return pending_confirmation
-                                    try:
-                                        dt = datetime.fromisoformat(event_start_time)
-                                        formatted_date = dt.strftime("%d/%m/%Y %H:%M")
-                                    except:
-                                        formatted_date = event_start_time
-                                    
-                                    result_data = {
-                                        "status": "pending_confirmation",
-                                        "action_type": "create_calendar_event",
-                                        "action_params": {
-                                            "summary": title,
-                                            "start_time": event_start_time,
-                                            "end_time": event_end_time
-                                        },
-                                        "confirmation_message": f"📅 He preparado este evento:\n\n---\n**Título:** {title}\n**Fecha:** {formatted_date}\n---\n\n¿Quieres que lo cree?"
-                                    }
+                                    # Normalize missing title to empty string for modal
+                                    title = title or ""
+
+                                # Initial request - return pending_confirmation
+                                try:
+                                    dt = datetime.fromisoformat(event_start_time)
+                                    formatted_date = dt.strftime("%d/%m/%Y %H:%M")
+                                except:
+                                    formatted_date = event_start_time
+
+                                result_data = {
+                                    "status": "pending_confirmation",
+                                    "action_type": "create_calendar_event",
+                                    "action_params": {
+                                        "summary": title,
+                                        "start_time": event_start_time,
+                                        "end_time": event_end_time
+                                    },
+                                    "confirmation_message": f"📅 He preparado este evento:\n\n---\n**Título:** {title if title else '(sin título)'}\n**Fecha:** {formatted_date}\n---\n\n¿Quieres que lo cree?"
+                                }
                     
                     elif is_list or ("list" in subtask.action.lower()):
                         # LIST EVENTS - Extract date filter if specified
@@ -912,8 +981,6 @@ class Executor:
                 user_id = self.execution_context.get("user_id", "default_user")
                 user_message = self.execution_context.get("user_message", "").lower()
                 original_message = self.execution_context.get("user_message", "")
-                
-                import re
                 
                 # PRIORITY: Check if this is a confirmation - execute directly with pending_data
                 confirmation_action = self.execution_context.get("confirmation_action")

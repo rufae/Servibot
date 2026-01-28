@@ -274,6 +274,133 @@ async def chat(message: ChatMessage, authorization: Optional[str] = Header(None)
             user_info = None
             exec_context['user_id'] = user_id  # Set fallback
 
+        # 3) Pre-execution: RAG enrichment and LLM response generation
+        # Determine if we should query RAG for this message
+        intent_detector = get_intent_detector()
+        intent_result = intent_detector.detect_intent(message.message)
+        logger.info(f"Intent detection (pre-exec): {intent_result['intent']} (needs_rag: {intent_result['needs_rag']})")
+        should_query_rag = intent_result['needs_rag']
+
+        sources = []
+        rag_context_text = None
+
+        if should_query_rag:
+            try:
+                from app.rag.query import semantic_search
+
+                # Detect file mention for filtering
+                file_filter = None
+                file_mention = re.search(r'([\w-]+\.(?:pdf|txt|docx?|xlsx?|csv|md))', message.message, re.IGNORECASE)
+                if file_mention:
+                    mentioned_file = file_mention.group(1)
+                    file_id_stem = mentioned_file.rsplit('.', 1)[0]
+                    file_filter = {"$or": [
+                        {"file_id": {"$eq": file_id_stem}},
+                        {"source": {"$eq": mentioned_file}}
+                    ]}
+                    logger.info(f"📄 Detected file mention pre-exec: {mentioned_file}")
+
+                logger.info(f"RAG pre-query for: {message.message[:120]}")
+                try:
+                    rag_results = semantic_search(
+                        query=message.message,
+                        top_k=5,
+                        collection_name="servibot_docs",
+                        filter_metadata=file_filter
+                    )
+
+                    if rag_results:
+                        for result in rag_results:
+                            doc_text = result.get("document", "")
+                            metadata = result.get("metadata", {})
+                            distance = result.get("distance", 1.0)
+                            source_name = metadata.get("source", metadata.get("file_id", "documento"))
+                            chunk_index = metadata.get("chunk_index", 0)
+                            if doc_text:
+                                snippet = doc_text[:400].strip() + ("..." if len(doc_text) > 400 else "")
+                                sources.append({
+                                    "filename": source_name,
+                                    "snippet": snippet,
+                                    "chunk_index": chunk_index,
+                                    "distance": round(distance, 3)
+                                })
+
+                        snippets = []
+                        for i, src in enumerate(sources[:3], 1):
+                            snippets.append(f"[Fragmento {i} de {src['filename']} ]\n{src['snippet']}")
+                        if snippets:
+                            rag_context_text = "\n\n---\n\n".join(snippets)
+                            logger.info(f"RAG pre-query returned {len(sources)} sources")
+                    else:
+                        logger.info("RAG pre-query returned no results")
+                        sources = []
+                except Exception as rag_err:
+                    logger.info(f"RAG pre-query error: {rag_err}")
+                    sources = []
+            except Exception as e:
+                logger.warning(f"RAG enrichment pre-exec failed: {e}")
+                sources = []
+        else:
+            logger.info("RAG pre-query skipped - not needed")
+
+        # Generate initial LLM response (so file_writer can use it when creating PDFs)
+        response_text = None
+        try:
+            from app.llm.local_client import generate_response_with_context
+            now = datetime.now()
+            month_map = {
+                1: "enero", 2: "febrero", 3: "marzo", 4: "abril", 5: "mayo", 6: "junio",
+                7: "julio", 8: "agosto", 9: "septiembre", 10: "octubre", 11: "noviembre", 12: "diciembre"
+            }
+            current_date = f"{now.day} de {month_map.get(now.month)} de {now.year}"
+
+            # Compute simple date context
+            def _parse_relative_days_local(text: str):
+                t = (text or "").lower()
+                t = t.replace("á", "a")
+                if "hoy" in t:
+                    return 0
+                if "pasado mañana" in t or "pasado manana" in t:
+                    return 2
+                if "mañana" in t or "manana" in t:
+                    return 1
+                m = re.search(r"dentro de\s+(\d+)\s*d[ií]as", t)
+                if not m:
+                    m = re.search(r"en\s+(\d+)\s*d[ií]as", t)
+                if m:
+                    try:
+                        return int(m.group(1))
+                    except Exception:
+                        return None
+                return None
+
+            computed_date_text = None
+            rel_days = _parse_relative_days_local(message.message)
+            if rel_days is not None:
+                target = now + timedelta(days=rel_days)
+                computed_date_text = f"Fecha calculada (servidor): {target.day} de {month_map.get(target.month)} de {target.year}"
+
+            tool_results_combined = computed_date_text
+            response_text = generate_response_with_context(
+                user_message=message.message,
+                tool_results=tool_results_combined,
+                rag_context=rag_context_text,
+                current_date=current_date,
+                user_info=user_info,
+                max_tokens=200,
+                temperature=0.3
+            )
+            logger.info(f"✅ Pre-exec LM generated response: {response_text[:120]}...")
+        except Exception as e:
+            logger.warning(f"Pre-exec LM generation failed: {e}")
+            response_text = None
+
+        # Ensure the exec_context contains the llm response for downstream tools
+        if response_text:
+            exec_context["llm_response"] = response_text
+        if rag_context_text:
+            exec_context["rag_context_text"] = rag_context_text
+
         # 3) Execute the plan
         exec_results = await executor.execute_plan(plan, user_confirmations=user_confirmations, context=exec_context)
         
@@ -283,6 +410,33 @@ async def chat(message: ChatMessage, authorization: Optional[str] = Header(None)
             if result.get("status") == "pending_confirmation":
                 pending_confirmation = result.get("result")
                 logger.info(f"🔔 Action requires confirmation: {pending_confirmation.get('action_type')}")
+                
+                # Check if we need to generate a creative title for calendar event
+                action_params = pending_confirmation.get("action_params", {})
+                if action_params.get("summary") == "__GENERATE_CREATIVE_TITLE__":
+                    logger.info("🎨 Generating creative title for calendar event")
+                    # Generate creative title using LLM
+                    from app.llm.local_client import generate_summary_from_prompt
+                    
+                    start_time = action_params.get("start_time", "")
+                    try:
+                        dt = datetime.fromisoformat(start_time)
+                        date_desc = dt.strftime("%d de %B de %Y a las %H:%M")
+                    except:
+                        date_desc = start_time
+                    
+                    title_prompt = f"Genera un título breve y creativo (máximo 5 palabras) para un evento de calendario que se realizará el {date_desc}. Solo responde con el título, sin comillas ni explicaciones adicionales."
+                    creative_title = generate_summary_from_prompt(title_prompt, max_tokens=20)
+                    creative_title = creative_title.strip().strip('"').strip("'")
+                    
+                    # Update the action_params with the creative title
+                    action_params["summary"] = creative_title
+                    pending_confirmation["action_params"] = action_params
+                    
+                    # Update confirmation message
+                    pending_confirmation["confirmation_message"] = f"📅 He preparado este evento:\n\n---\n**Título:** {creative_title}\n**Fecha:** {date_desc}\n---\n\n¿Quieres que lo cree?"
+                    logger.info(f"✅ Generated creative title: {creative_title}")
+                
                 break
         
         # If confirmation is pending, return early with confirmation request
@@ -509,79 +663,8 @@ async def chat(message: ChatMessage, authorization: Optional[str] = Header(None)
         else:
             logger.info(f"RAG skipped - query not document-related")
 
-        # 6) Generate response using LM with full context
-        # ALWAYS use the LM to generate natural, contextual responses
-        response_text = None
-        # Server-side relative date resolution to avoid LM arithmetic errors
-        def _parse_relative_days(text: str):
-            t = (text or "").lower()
-            t = t.replace("á", "a")
-            if "hoy" in t:
-                return 0
-            if "pasado mañana" in t or "pasado mañana" in t:
-                return 2
-            if "mañana" in t or "manana" in t:
-                return 1
-            m = re.search(r"dentro de\s+(\d+)\s*d[ií]as", t)
-            if not m:
-                m = re.search(r"en\s+(\d+)\s*d[ií]as", t)
-            if m:
-                try:
-                    return int(m.group(1))
-                except Exception:
-                    return None
-            return None
-
-        computed_date_text = None
-        rel_days = _parse_relative_days(message.message)
-        if rel_days is not None:
-            now_local = datetime.now()
-            target = now_local + timedelta(days=rel_days)
-            month_map = {
-                1: "enero", 2: "febrero", 3: "marzo", 4: "abril", 5: "mayo", 6: "junio",
-                7: "julio", 8: "agosto", 9: "septiembre", 10: "octubre", 11: "noviembre", 12: "diciembre"
-            }
-            computed_date_text = f"Fecha calculada (servidor): {target.day} de {month_map.get(target.month)} de {target.year}"
-        
-        try:
-            from app.llm.local_client import generate_response_with_context
-            
-            # Get current date for temporal context (force Spanish month names)
-            now = datetime.now()
-            month_map = {
-                1: "enero", 2: "febrero", 3: "marzo", 4: "abril", 5: "mayo", 6: "junio",
-                7: "julio", 8: "agosto", 9: "septiembre", 10: "octubre", 11: "noviembre", 12: "diciembre"
-            }
-            current_date = f"{now.day} de {month_map.get(now.month, now.strftime('%B'))} de {now.year}"
-            
-            # Combine any tool response with computed date context (if present)
-            tool_results_combined = None
-            if tool_response and computed_date_text:
-                tool_results_combined = f"{tool_response}\n\n{computed_date_text}"
-            elif computed_date_text:
-                tool_results_combined = computed_date_text
-            else:
-                tool_results_combined = tool_response
-
-            # Generate response with full context
-            response_text = generate_response_with_context(
-                user_message=message.message,
-                tool_results=tool_results_combined,
-                rag_context=rag_context_text,
-                current_date=current_date,
-                user_info=user_info,
-                max_tokens=200,
-                temperature=0.3  # Slightly creative but still factual
-            )
-            
-            logger.info(f"✅ LM generated response: {response_text[:100]}...")
-            
-            # Store LLM response in execution context for PDF generation
-            execution_context["llm_response"] = response_text
-            
-        except Exception as e:
-            logger.warning(f"LM generation failed: {e}")
-            # Fallback logic if LM fails
+        # Ensure we have a response_text (may have been generated pre-exec)
+        if not response_text:
             if tool_response:
                 response_text = tool_response
             elif rag_context_text:

@@ -2,74 +2,36 @@ import { useState, useEffect } from 'react'
 import { User, Mail, Phone, Search, RefreshCw, AlertCircle, X } from 'lucide-react'
 import Swal from 'sweetalert2'
 import { createPortal } from 'react-dom'
+import { useContactsStore, useAuthStore } from '../store'
 
 export default function ContactsPanel() {
-  const [contacts, setContacts] = useState([])
+  const contacts = useContactsStore((s) => s.contacts)
   const [filteredContacts, setFilteredContacts] = useState([])
   const [searchQuery, setSearchQuery] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState(null)
-  const [isConnected, setIsConnected] = useState(false)
+  const isLoading = useContactsStore((s) => s.isLoadingContacts)
+  const error = useContactsStore((s) => s.errorContacts)
+  const loadContacts = useContactsStore((s) => s.loadContacts)
+  const reloadContacts = useContactsStore((s) => s.reloadContacts)
+  const isConnected = useAuthStore((s) => s.googleConnected)
   const [selectedContact, setSelectedContact] = useState(null)
   const [showContactModal, setShowContactModal] = useState(false)
 
   useEffect(() => {
     loadContacts()
-  }, [])
+  }, [loadContacts])
 
   useEffect(() => {
     // Filter contacts based on search query
     if (searchQuery.trim()) {
       const filtered = contacts.filter(contact =>
         contact.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        contact.email?.toLowerCase().includes(searchQuery.toLowerCase())
+        (contact.email || '').toLowerCase().includes(searchQuery.toLowerCase())
       )
       setFilteredContacts(filtered)
     } else {
       setFilteredContacts(contacts)
     }
   }, [searchQuery, contacts])
-
-  const loadContacts = async () => {
-    setIsLoading(true)
-    setError(null)
-    
-    try {
-      const token = localStorage.getItem('auth_token')
-      if (!token) {
-        setError('No estás autenticado')
-        setIsLoading(false)
-        return
-      }
-
-      const response = await fetch('http://localhost:8000/api/google/contacts?page_size=200', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      })
-
-      if (response.status === 403) {
-        setIsConnected(false)
-        setError('Conecta tu cuenta de Google para ver tus contactos')
-        setIsLoading(false)
-        return
-      }
-
-      if (!response.ok) {
-        throw new Error('Error al cargar contactos')
-      }
-
-      const data = await response.json()
-      setContacts(data.contacts || [])
-      setFilteredContacts(data.contacts || [])
-      setIsConnected(true)
-    } catch (err) {
-      console.error('Error loading contacts:', err)
-      setError(err.message)
-    } finally {
-      setIsLoading(false)
-    }
-  }
 
   const handleRefresh = () => {
     Swal.fire({
@@ -82,7 +44,7 @@ export default function ContactsPanel() {
       background: 'var(--bg-panel)',
       color: 'var(--text-primary)'
     })
-    loadContacts()
+    reloadContacts()
   }
 
   const handleConnectGoogle = () => {

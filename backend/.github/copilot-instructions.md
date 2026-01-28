@@ -2,7 +2,7 @@
 
 ## Guía Específica para el Backend del Proyecto ServiBot
 
----
+--- CONTESTA EN ESPAÑOL
 
 ## 0 — Identidad y Rol de Copilot en Backend
 

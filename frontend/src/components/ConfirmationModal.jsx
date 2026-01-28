@@ -1,14 +1,55 @@
 import { X, Check, Edit2, XCircle, Save } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 
 export default function ConfirmationModal({ pendingAction, onConfirm, onEdit, onCancel }) {
   if (!pendingAction) return null
 
   const { action_type, action_params, confirmation_message } = pendingAction
   
-  // Edit mode state - initialize once and don't reset
-  const [isEditMode, setIsEditMode] = useState(false)
+  // Edit mode state - initialize once and persist across remounts using sessionStorage
+  // Stable action key: use action_type plus core timestamp/title fields to avoid
+  // JSON ordering or reference changes causing key instability.
+  const actionKey = useMemo(() => {
+    try {
+      const core = `${action_params?.summary || ''}::${action_params?.start_time || ''}::${action_params?.end_time || ''}`
+      const raw = `${action_type}::${core}`
+      return typeof window !== 'undefined' && window.btoa ? window.btoa(unescape(encodeURIComponent(raw))) : raw
+    } catch {
+      return `${action_type}`
+    }
+  }, [action_type, action_params?.summary, action_params?.start_time, action_params?.end_time])
+
+  const [isEditMode, setIsEditMode] = useState(() => {
+    try {
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        return sessionStorage.getItem(`servibot_edit_${actionKey}`) === '1'
+      }
+    } catch {
+      // ignore
+    }
+    return false
+  })
+
   const [editedParams, setEditedParams] = useState(action_params || {})
+
+  // Keep sessionStorage in sync when actionKey changes (do not forcibly reset edit mode)
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        const v = sessionStorage.getItem(`servibot_edit_${actionKey}`)
+        console.log('🔁 actionKey changed, session edit flag:', v)
+        if (v === '1') setIsEditMode(true)
+        // Do not clear isEditMode here; we only restore if session indicates edit mode
+      }
+    } catch (e) {
+      console.log('⚠️ sessionStorage read failed', e)
+    }
+  }, [actionKey])
+
+  // Keep editedParams in sync when pendingAction first appears
+  useEffect(() => {
+    setEditedParams(action_params || {})
+  }, [action_params])
 
   // Prevent background scroll when modal is open
   useEffect(() => {
@@ -113,24 +154,95 @@ export default function ConfirmationModal({ pendingAction, onConfirm, onEdit, on
         }
       }
 
-      return (
-        <div className="bg-gradient-to-br from-green-500/10 to-blue-500/10 rounded-lg p-4 border border-green-500/30">
-          <div className="space-y-2">
-            <div className="flex items-start gap-2">
-              <span className="text-sm font-semibold text-green-300 min-w-[70px]">Título:</span>
-              <span className="text-sm text-white">{action_params.summary}</span>
-            </div>
-            <div className="flex items-start gap-2">
-              <span className="text-sm font-semibold text-green-300 min-w-[70px]">Inicio:</span>
-              <span className="text-sm text-white">{formatDate(action_params.start_time)}</span>
-            </div>
-            <div className="flex items-start gap-2">
-              <span className="text-sm font-semibold text-green-300 min-w-[70px]">Fin:</span>
-              <span className="text-sm text-white">{formatDate(action_params.end_time)}</span>
+      const formatDateForInput = (isoString) => {
+        try {
+          if (!isoString) return ''
+          const d = new Date(isoString)
+          const pad = (n) => String(n).padStart(2, '0')
+          const year = d.getFullYear()
+          const month = pad(d.getMonth() + 1)
+          const day = pad(d.getDate())
+          const hours = pad(d.getHours())
+          const minutes = pad(d.getMinutes())
+          return `${year}-${month}-${day}T${hours}:${minutes}`
+        } catch {
+          return ''
+        }
+      }
+
+      if (isEditMode) {
+        console.log('✏️ Rendering EDIT mode for calendar event with params:', editedParams)
+        return (
+          <div className="bg-gradient-to-br from-orange-500/10 to-yellow-500/10 rounded-lg p-4 border-2 border-orange-500/50">
+            <p className="text-orange-300 text-xs mb-3 font-bold">⚡ MODO EDICIÓN ACTIVO</p>
+            <div className="space-y-4">
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-semibold text-green-300">Título:</label>
+                <input
+                  type="text"
+                  value={editedParams.summary || action_params.summary || ''}
+                  onChange={(e) => setEditedParams({ ...editedParams, summary: e.target.value })}
+                  className="bg-gray-800/90 text-white text-sm rounded-lg px-3 py-2 border-2 border-green-500/50 focus:border-green-500 focus:outline-none"
+                  placeholder="Título del evento"
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-semibold text-green-300">Inicio:</label>
+                <input
+                  type="datetime-local"
+                  value={formatDateForInput(editedParams.start_time || action_params.start_time)}
+                  onChange={(e) => {
+                    try {
+                      // e.target.value is local 'YYYY-MM-DDTHH:mm'
+                      const iso = new Date(e.target.value).toISOString()
+                      setEditedParams({ ...editedParams, start_time: iso })
+                    } catch (err) {
+                      console.error('Invalid date input', err)
+                    }
+                  }}
+                  className="bg-gray-800/90 text-white text-sm rounded-lg px-3 py-2 border-2 border-green-500/50 focus:border-green-500 focus:outline-none"
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-semibold text-green-300">Fin:</label>
+                <input
+                  type="datetime-local"
+                  value={formatDateForInput(editedParams.end_time || action_params.end_time)}
+                  onChange={(e) => {
+                    try {
+                      const iso = new Date(e.target.value).toISOString()
+                      setEditedParams({ ...editedParams, end_time: iso })
+                    } catch (err) {
+                      console.error('Invalid date input', err)
+                    }
+                  }}
+                  className="bg-gray-800/90 text-white text-sm rounded-lg px-3 py-2 border-2 border-green-500/50 focus:border-green-500 focus:outline-none"
+                />
+              </div>
             </div>
           </div>
-        </div>
-      )
+        )
+      } else {
+        console.log('👁️ Rendering VIEW mode for calendar event')
+        return (
+          <div className="bg-gradient-to-br from-green-500/10 to-blue-500/10 rounded-lg p-4 border border-green-500/30">
+            <div className="space-y-2">
+              <div className="flex items-start gap-2">
+                <span className="text-sm font-semibold text-green-300 min-w-[70px]">Título:</span>
+                <span className="text-sm text-white">{action_params.summary}</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="text-sm font-semibold text-green-300 min-w-[70px]">Inicio:</span>
+                <span className="text-sm text-white">{formatDate(action_params.start_time)}</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="text-sm font-semibold text-green-300 min-w-[70px]">Fin:</span>
+                <span className="text-sm text-white">{formatDate(action_params.end_time)}</span>
+              </div>
+            </div>
+          </div>
+        )
+      }
     }
 
     // Fallback for other action types
@@ -219,7 +331,7 @@ export default function ConfirmationModal({ pendingAction, onConfirm, onEdit, on
             </div>
           )}
 
-          {/* Action Details */}
+          {/* Action-specific details (view / edit) */}
           {renderActionDetails()}
 
           {/* Warning */}
@@ -254,6 +366,11 @@ export default function ConfirmationModal({ pendingAction, onConfirm, onEdit, on
                     // Sync editedParams with current action_params before entering edit mode
                     setEditedParams({ ...action_params })
                     setIsEditMode(true)
+                    try {
+                      if (typeof window !== 'undefined' && window.sessionStorage) {
+                        sessionStorage.setItem(`servibot_edit_${actionKey}`, '1')
+                      }
+                    } catch {}
                   }}
                   className="px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg sm:rounded-xl bg-primary-600/20 hover:bg-primary-600/30 text-primary-300 hover:text-primary-100 transition-all border border-primary-500/30 flex items-center gap-1.5 sm:gap-2 font-medium text-xs sm:text-sm hover:scale-105 active:scale-95"
                 >
@@ -294,6 +411,11 @@ export default function ConfirmationModal({ pendingAction, onConfirm, onEdit, on
                   }
                   console.log('✏️ ConfirmationModal - Edit mode updatedAction:', updatedAction)
                   setIsEditMode(false)
+                  try {
+                    if (typeof window !== 'undefined' && window.sessionStorage) {
+                      sessionStorage.removeItem(`servibot_edit_${actionKey}`)
+                    }
+                  } catch {}
                   onConfirm(updatedAction)
                 }}
                 className="px-5 py-2.5 rounded-lg bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 text-white transition-all shadow-lg shadow-green-500/20 hover:shadow-green-500/40 flex items-center gap-2 font-medium"
