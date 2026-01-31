@@ -245,6 +245,26 @@ export default function ConfirmationModal({ pendingAction, onConfirm, onEdit, on
       }
     }
 
+    if (action_type === 'delete_calendar_event') {
+      // Show a simple, user-friendly summary for deletions instead of raw JSON
+      return (
+        <div className="bg-gradient-to-br from-red-500/10 to-danger-500/10 rounded-lg p-4 border border-danger-500/30">
+          <div className="space-y-2">
+            <div className="flex items-start gap-2">
+              <span className="text-sm font-semibold text-red-300 min-w-[70px]">Evento:</span>
+              <span className="text-sm text-white">{action_params?.event_title || action_params?.summary || 'Evento sin título'}</span>
+            </div>
+            {action_params?.start_time && (
+              <div className="flex items-start gap-2">
+                <span className="text-sm font-semibold text-red-300 min-w-[70px]">Fecha:</span>
+                <span className="text-sm text-white">{new Date(action_params.start_time).toLocaleString()}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )
+    }
+
     // Fallback for other action types
     return (
       <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-600/30">
