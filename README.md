@@ -7,10 +7,6 @@
 
 **ServiBot** is an autonomous multimodal AI agent that manages personal tasks through natural language, integrating RAG (Retrieval Augmented Generation), tool orchestration, voice interaction, and real automation capabilities.
 
-<p align="center">
-  <img src="Servibot.png" width="720" alt="ServiBot: arquitectura del agente autónomo multimodal" />
-</p>
-
 ## 🎯 Project Overview
 
 This project is part of the AI Master's Capstone (2025), demonstrating advanced AI concepts including:
