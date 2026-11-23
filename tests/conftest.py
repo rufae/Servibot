@@ -10,6 +10,9 @@ import os
 # Add the `backend` directory to sys.path (project root + '/backend')
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 backend_path = os.path.join(project_root, 'backend')
+# Raiz para `backend.app.main` (import del conftest) y backend/ para los
+# imports internos `app.*` de la API: ambos funcionan con pytest desnudo.
+sys.path.insert(0, project_root)
 sys.path.insert(0, backend_path)
 
 from backend.app.main import app
