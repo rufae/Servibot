@@ -42,15 +42,28 @@ def test_upload_endpoint_unsupported_file(client):
     assert response.status_code == 400
 
 
-def test_upload_status_endpoint(client):
-    """Test the upload status endpoint."""
-    file_id = "test_file_123"
-    response = client.get(f"/api/upload/status/{file_id}")
+def test_upload_status_endpoint_unknown_returns_404(client):
+    """Un id sin registrar devuelve 404 con detalle legible."""
+    response = client.get("/api/upload/status/test_file_123")
+    assert response.status_code == 404
+    assert "detail" in response.json()
+
+
+def test_upload_status_endpoint_returns_registered_status(client):
+    """Con el estado registrado devuelve la ficha completa del archivo."""
+    from app.api import upload as upload_api
+
+    upload_api.UPLOAD_STATUS["test_file_123"] = {
+        "status": "completed",
+        "message": "ok",
+        "attempts": 1,
+        "debug": {},
+    }
+    response = client.get("/api/upload/status/test_file_123")
     assert response.status_code == 200
-    
     data = response.json()
-    assert "file_id" in data
-    assert data["file_id"] == file_id
+    assert data["file_id"] == "test_file_123"
+    assert data["status"] == "completed"
 
 
 def test_list_uploaded_files(client):

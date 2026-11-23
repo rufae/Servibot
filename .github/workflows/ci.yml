@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+env:
+  PYTHON_VERSION: "3.10"
+
+jobs:
+  test:
+    name: Backend tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies
+        run: |
+          pip install setuptools
+          pip install -r backend/requirements.txt
+      - name: Run tests
+        run: pytest tests/ -q --cov=backend --cov-report=term

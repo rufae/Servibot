@@ -1,6 +1,15 @@
 # 🤖 ServiBot - Autonomous AI Assistant
 
+[![CI](https://github.com/rufae/Servibot/actions/workflows/ci.yml/badge.svg)](https://github.com/rufae/Servibot/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-14-brightgreen.svg)](tests/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/backend-FastAPI-009688.svg)](backend/)
+
 **ServiBot** is an autonomous multimodal AI agent that manages personal tasks through natural language, integrating RAG (Retrieval Augmented Generation), tool orchestration, voice interaction, and real automation capabilities.
+
+<p align="center">
+  <img src="Servibot.png" width="720" alt="ServiBot: arquitectura del agente autónomo multimodal" />
+</p>
 
 ## 🎯 Project Overview
 

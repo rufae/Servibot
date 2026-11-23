@@ -69,3 +69,4 @@ token.json
 
 # Vite cache
 frontend/.vite/
+data/upload_status.json
